@@ -123,8 +123,9 @@ def test_setup_installs_stop_as_summary_command_and_is_idempotent(tmp_path, monk
     stops = [entry for entry in hooks if entry["event"] == "Stop"]
     assert len(stops) == 2
     assert stops[0]["command"] == "user-stop"
-    assert "knowledge_summary.py" in stops[1]["command"]
-    assert "vaws_session.py" not in stops[1]["command"]
+    arguments = client_setup.hook_argv(stops[1]["command"])
+    assert any(Path(argument).name == "knowledge_summary.py" for argument in arguments)
+    assert all(Path(argument).name != "vaws_session.py" for argument in arguments)
     assert all(entry["event"] != "SessionSetup" for entry in hooks)
     config.write_text(plan["files"][config])
     repeated = client_setup.build_plan("kimi", project, kimi_config=config)

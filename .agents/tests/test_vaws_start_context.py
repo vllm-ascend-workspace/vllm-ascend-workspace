@@ -131,7 +131,7 @@ def test_prepared_native_worktree_and_broken_selection(project):
     nested.mkdir()
     native = "native-worktree"
     result = run_hook(root, "claude", payload("claude", "SessionStart", native, nested))
-    assert "workspace is prepared: W=" + str(target) in result.stdout
+    assert "workspace is prepared: W=" + str(target) in hint("claude", "SessionStart", result.stdout)
     assert not (root / ".vaws-local/tasks").exists()
     selected = target / ".vaws-local/environment-selection" / f"{sys.platform}.json"
     selected.write_text("{broken")

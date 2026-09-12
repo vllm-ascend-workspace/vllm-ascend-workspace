@@ -49,7 +49,8 @@ def test_all_clients_receive_knowledge_access_and_only_supported_summary_events(
     if client == "cursor":
         ended = payload["hooks"]["sessionEnd"]
         assert len(ended) == 2
-        assert any("vaws_session.py" in entry["command"] for entry in ended)
+        assert any(Path(argument).name == "vaws_session.py"
+                   for entry in ended for argument in setup.hook_argv(entry["command"]))
         assert sum(entry["command"] == command for entry in ended) == 1
     arguments = setup.hook_argv(command)
     if client == "claude":
