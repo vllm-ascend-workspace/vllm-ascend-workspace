@@ -1212,6 +1212,24 @@ class CurrentMainFindingScopeTests(unittest.TestCase):
 
 
 class LockfileVersionAllowanceTests(unittest.TestCase):
+    def test_performance_version_allowance_is_exact_and_document_scoped(self) -> None:
+        policy = guard.load_policy(POLICY_PATH)
+        path = "docs/six-scenario-performance-2026-09-13.md"
+        value = "torch_npu 2.10.0.post4.dev20260715"
+        findings = guard.scan_document(value, path=path, policy=policy)
+        self.assertEqual([item.allowlisted_by for item in findings],
+                         ["six-scenario-report-torch-npu-dev-date"])
+        for text, candidate_path in (
+            (value, "report.md"),
+            ("torch_npu 2.10.0.post4.dev20260716", path),
+            ("owner q12345678", path),
+            ("host " + SYNTHETIC_IPV4, path),
+        ):
+            with self.subTest(text=text, path=candidate_path):
+                findings = guard.scan_document(text, path=candidate_path, policy=policy)
+                self.assertTrue(findings)
+                self.assertTrue(all(item.allowlisted_by is None for item in findings))
+
     def test_package_version_allowance_cannot_hide_an_address_elsewhere(self) -> None:
         policy = guard.load_policy(POLICY_PATH)
         findings = guard.scan_document("1.2.0.2", path="uv.lock", policy=policy)

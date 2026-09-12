@@ -112,6 +112,12 @@ allowlist:
     match: dev20260801
     justification: Deterministic torch_npu development-version date suffix in the accepted envelope test fixture; it is a date, not a person's identifier.
 
+  - id: six-scenario-report-torch-npu-dev-date
+    path_glob: docs/six-scenario-performance-2026-09-13.md
+    categories: [internal-identifier]
+    match: dev20260715
+    justification: Public torch_npu development-version date recorded as the experiment's fixed dependency version; it identifies neither a person nor an internal host.
+
   # ------------------------------------------------------------- credentials
   - id: run-manifest-test-redaction-value
     path_glob: .agents/tests/test_run_manifest.py

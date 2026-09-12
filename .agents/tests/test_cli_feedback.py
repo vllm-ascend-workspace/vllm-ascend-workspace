@@ -1,4 +1,4 @@
-"""Parser feedback must not depend on task state or execution backends."""
+"""Parser feedback may read public API docs but must not access execution state."""
 from __future__ import annotations
 
 import os
@@ -14,16 +14,18 @@ SCRIPT = ROOT / ".agents/scripts/vaws.py"
 
 class CliFeedbackTests(unittest.TestCase):
     def test_help_and_root_argument_errors_need_no_state_or_subprocess(self):
-        # sitecustomize is inherited by POSIX execve as well as Windows runpy.
+        # The package help imports TaskClient to reuse its public docstring.
+        # Importing that facade is allowed; backend imports and actual state or
+        # remote operations are not. sitecustomize survives both launcher paths.
         guard = '''
 import importlib.abc, sys
 class NoExecutionImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname in {"vaws_local_state", "vaws_coordinator.service", "vaws_coordinator.backend", "vaws_coordinator.task_client", "remote_dev.core.ssh_transport"}:
+        if fullname in {"vaws_local_state", "vaws_coordinator.service", "vaws_coordinator.backend", "remote_dev.core.ssh_transport"}:
             raise AssertionError("parser imported execution state: " + fullname)
 sys.meta_path.insert(0, NoExecutionImports())
 def audit(event, args):
-    if event in {"socket.connect", "subprocess.Popen", "os.system"}:
+    if event in {"socket.connect", "subprocess.Popen", "os.system", "sqlite3.connect"}:
         raise AssertionError("parser attempted side effect: " + event)
 sys.addaudithook(audit)
 '''
