@@ -82,6 +82,32 @@ def test_grok_summary_preserves_foreign_stop_and_existing_session_hook(tmp_path,
     assert len(commands) == 2
 
 
+@pytest.mark.parametrize("existing_summary", [False, True])
+def test_cursor_existing_session_end_adds_or_updates_summary(tmp_path, monkeypatch, existing_summary):
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    monkeypatch.setattr(setup, "OWNED_HOOK_SCRIPT", tmp_path / ".agents/hooks/vaws_session.py")
+    path = tmp_path / HOOK_FILES["cursor"]
+    desired = json.loads(setup.configuration("cursor", tmp_path)[path])
+    session, summary = desired["hooks"]["sessionEnd"]
+    foreign = {"command": "foreign-session-end", "timeout": 23}
+    existing = [{**session, "timeout": 19}, foreign]
+    if existing_summary:
+        arguments = setup.hook_argv(summary["command"])
+        arguments[0] = str(tmp_path / ".vaws-local/env-links" / ("a" * 64) / "bin/python")
+        existing.append({"command": setup.local_hook_command(arguments), "timeout": 31})
+    desired["hooks"]["sessionEnd"] = existing
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(desired), encoding="utf-8")
+
+    updated = setup.configuration("cursor", tmp_path)[path]
+    ended = json.loads(updated)["hooks"]["sessionEnd"]
+    assert ended[:2] == [{**session, "timeout": 19}, foreign]
+    assert len(ended) == 3
+    assert ended[2] == ({**summary, "timeout": 31} if existing_summary else summary)
+    path.write_text(updated, encoding="utf-8")
+    assert setup.configuration("cursor", tmp_path)[path] == updated
+
+
 @pytest.mark.parametrize("client", ["claude", "cursor", "codex", "grok"])
 def test_generated_knowledge_owner_and_paths_migrate_without_changing_custom_values(client, tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"

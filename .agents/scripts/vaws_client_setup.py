@@ -654,7 +654,11 @@ def merge_json(path, *, hooks=None, mcp=None, notes=None, client=None, project=N
     if hooks:
         target = value.setdefault("hooks", {})
         for event, groups in hooks.items():
-            target[event] = merge_hook_event(target.get(event) or [], groups, client, project)
+            merged = target.get(event) or []
+            # A native event can own both session and summary hook commands.
+            for group in groups:
+                merged = merge_hook_event(merged, [group], client, project)
+            target[event] = merged
         if path.parent.name == ".cursor":
             value.setdefault("version", 1)
     if mcp:
