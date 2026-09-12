@@ -85,10 +85,15 @@ def test_kimi_code_uses_native_home_and_discovers_scoped_project_mcp(tmp_path, m
     assert setup.kimi_home() / "config.toml" in plan["files"]
     assert plan["launch_argv"] == ["kimi"]
     assert plan["launch_cwd"] == str(project)
-    assert setup.kimi_home() / "mcp.json" not in plan["files"]
-    servers = json.loads(plan["files"][project / ".kimi-code/mcp.json"])["mcpServers"]
-    assert servers["vaws-task"]["toolTimeoutMs"] == 600000
-    assert "type" not in servers["vaws-task"]
+    assert json.loads(plan["files"][setup.kimi_home() / "mcp.json"])["mcpServers"]["existing"] == {}
+    project_servers = json.loads(plan["files"][project / ".kimi-code/mcp.json"])["mcpServers"]
+    user_servers = json.loads(plan["files"][setup.kimi_home() / "mcp.json"])["mcpServers"]
+    # An owned native launch moves to the user provider; a custom interpreter
+    # stays project-scoped. Both native discoveries must expose exactly one.
+    entries = [servers["vaws-task"] for servers in (project_servers, user_servers) if "vaws-task" in servers]
+    assert len(entries) == 1
+    assert entries[0]["toolTimeoutMs"] == 600000
+    assert "type" not in entries[0]
 
 
 def test_generated_task_owner_migrates_without_rewriting_user_provider_or_policy(monkeypatch):

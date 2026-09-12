@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -387,6 +389,45 @@ def test_update_lock_is_shared_across_linked_worktrees(fixture):
         with pytest.raises(updates.Deferred, match="updater_running"):
             with updates.update_lock(linked):
                 pytest.fail("both publishers obtained the same repository lock")
+
+
+def test_new_session_waits_for_another_preparation_then_continues(fixture, monkeypatch, capsys):
+    waiting, acquired = threading.Event(), threading.Event()
+    errors = []
+    sleep = time.sleep
+
+    def observe_wait(seconds):
+        waiting.set()
+        sleep(seconds)
+
+    def next_session():
+        try:
+            with updates.update_lock(fixture["root"], wait_seconds=5):
+                acquired.set()
+        except Exception as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(updates.time, "sleep", observe_wait)
+    with updates.update_lock(fixture["root"]):
+        worker = threading.Thread(target=next_session)
+        worker.start()
+        assert waiting.wait(5), "the second session did not reach the shared preparation lock"
+        assert not acquired.is_set()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert not errors
+    assert acquired.is_set()
+    assert capsys.readouterr().err.count("waiting for another session") == 1
+
+
+def test_preparation_wait_timeout_keeps_lock_and_elapsed_evidence(fixture):
+    with updates.update_lock(fixture["root"]):
+        with pytest.raises(updates.Deferred, match="preparation is still running") as failure:
+            with updates.update_lock(fixture["root"], wait_seconds=0.02):
+                pytest.fail("a timed-out waiter acquired another session's lock")
+    assert failure.value.reason == "updater_running"
+    assert Path(failure.value.evidence["lock"]).name == "vaws-update.lock"
+    assert failure.value.evidence["waited_seconds"] >= 0.02
 
 
 def test_git_failure_log_retains_stderr_without_token(fixture):

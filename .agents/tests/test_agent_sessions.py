@@ -283,14 +283,15 @@ class ScaffoldSetupTests(unittest.TestCase):
         result = tomllib.loads(setup.configuration("kimi", self.root, kimi_config=kimi)[kimi])
         self.assertTrue(all(item["timeout"] >= 12 for item in result["hooks"]))
 
-    def test_cursor_native_setup_supplies_context_only_to_task_tools(self):
+    def test_cursor_native_setup_supplies_context_to_task_and_companion_tools(self):
         import re
         files = setup.configuration("cursor", self.root)
         hooks = json.loads(files[self.root / ".cursor/hooks.json"])["hooks"]
         hook = hooks["preToolUse"][0]
-        for name in ("vaws_run", "MCP:vaws_execution", "mcp__vaws_task__vaws_message"):
+        for name in ("vaws_run", "MCP:vaws_execution", "mcp__vaws_task__vaws_message",
+                     "MCP:knowledge_query", "MCP:remote_read"):
             self.assertIsNotNone(re.search(hook["matcher"], name))
-        for name in ("read_file", "MCP:knowledge_query", "vaws_run_unrelated"):
+        for name in ("read_file", "MCP:user_query", "vaws_run_unrelated"):
             self.assertIsNone(re.search(hook["matcher"], name))
         self.assertGreaterEqual(hook["timeout"], 12)
         native = json.loads(files[self.root / ".cursor/worktrees.json"])
@@ -307,8 +308,9 @@ class ScaffoldSetupTests(unittest.TestCase):
                 wanted = setup.hook_groups(client, self.root)[event]
                 for name in ("vaws_session", "MCP:vaws_run", "vaws_task__vaws_message"):
                     self.assertIsNotNone(re.search(wanted[0]["matcher"], name))
-                for name in ("Bash", "read_file", "MCP:knowledge_query", "vaws_run_other"):
+                for name in ("Bash", "read_file", "MCP:user_query", "vaws_run_other"):
                     self.assertIsNone(re.search(wanted[0]["matcher"], name))
+                self.assertEqual(bool(re.search(wanted[0]["matcher"], "MCP:knowledge_query")), client == "cursor")
                 old = {key: value for key, value in wanted[0].items() if key != "matcher"}
                 settings = self.root / relative
                 settings.parent.mkdir(parents=True, exist_ok=True)

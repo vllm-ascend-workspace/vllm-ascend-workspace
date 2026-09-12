@@ -10,7 +10,7 @@
 
 > 初始化这个工作区，配好 vLLM Ascend 的开发环境。
 
-初始化复用已有配置，安装锁定依赖，并通过 `vaws_client_setup.py --client all --apply` 一次检测和配置已安装的 Agent 客户端；不以调用 `repo-init` Skill 为前提。原生支持的默认模式由配置处理，仍需客户端界面完成的选择会在初始化时明确列出，由可用的客户端工具或 computer use 完成。配置后的新会话由客户端创建 worktree、运行 setup，再让 Agent 开始工作；日常无需 Agent 运行启动 CLI。已验证版本及实际边界见[原生客户端验收](docs/native-client-validation-2026-09-12.md)和[原生客户端与编辑隔离](docs/native-workspace-isolation.md)。安装与平台行为见 [dependency-plane.md](docs/dependency-plane.md) 和 [platform-contract.md](docs/platform-contract.md)。
+初始化复用已有配置，安装锁定依赖，并通过 `vaws_client_setup.py --client all --apply` 一次配置已安装的 Codex、Cursor、Claude、Grok 和 Kimi；不以调用 Skill 或安装个人修改版客户端为前提。项目短指引让新任务准备一次独立编辑目录、主仓版本及配套环境；已有原生 worktree setup 的结果直接复用。用户继续在原客户端表达目标，恢复会话沿用原目录和环境。实际边界见[编辑隔离合同](docs/native-workspace-isolation.md)，本轮实测进度见[验收记录](docs/unified-session-validation-2026-09-13.md)。安装与平台行为见 [dependency-plane.md](docs/dependency-plane.md) 和 [platform-contract.md](docs/platform-contract.md)。
 
 日常工作只需说明目标和影响结果的输入，例如：
 
@@ -64,7 +64,7 @@ Agent 按任务选择工具或技能；执行引用、状态推进和报告由�
 
 规范仓库是 `vllm-ascend-workspace/vllm-ascend-workspace`。`vllm/`、`vllm-ascend/` 是指向社区上游的 Git 子模块。首次使用由 `AGENTS.md` 和原生客户端入口提示 GitHub 身份，无需调用 `repo-init`；开发 Fork 必须属于个人账号，`origin` 指向个人 Fork，`upstream` 保留官方来源。
 
-配置后，原生客户端的新 worktree setup 检查一次 VAWS 主仓，为符合条件的新目录采用该提交、锁定依赖和客户端接线，并同步个人 Fork，无需等待 Release。新会话固定代码和环境；已有目录与恢复会话沿用原版本，工作中不检查或切换更新。普通 Local 会话不会被 hook 自动换成 worktree。见[个人 Fork 与自动更新](docs/forks-and-updates.md)。第一版已接通共享 root 下的用户容器命名、随正常调用投递的留言和算子产物缓存；权重沿用服务器现有路径，初始化后无需 Agent 填写身份、轮询或登记成果。见[身份与协调](docs/identity-and-agent-coordination.md)。
+新任务检查一次 VAWS 主仓，采用该提交的锁定组件组合并同步个人 Fork，无需等待 Release。启动入口绑定返回目录的 sources，MCP gateway 为该任务固定组件环境；客户端 UI 可以保持原目录，Agent 在返回目录中编辑。工作中和恢复会话不检查或切换版本，知识配置、内容和模型/index 缓存按工作区家族复用。见[个人 Fork 与自动更新](docs/forks-and-updates.md)。共享 root 下的用户容器命名、随正常调用投递的留言和算子产物缓存由组件处理；权重沿用服务器现有路径，初始化后无需 Agent 填写身份、轮询或登记成果。见[身份与协调](docs/identity-and-agent-coordination.md)。
 
 `.agents/skills/` 保存业务技能，`.agents/lib/` 保存共享消费代码，`.agents/scripts/` 保存客户端接线和维护工具。客户端投影统一指向规范技能。运行状态和私人配置放在未跟踪的 `.vaws-local/`，凭据不入库。公开知识只使用包生成的脱敏副本。
 

@@ -12,24 +12,28 @@ See [target-state.md](target-state.md) and [dependency-plane.md](dependency-plan
 
 ## 1. Public actions
 
-Configure clients with `uv run --no-project python .agents/scripts/vaws_client_setup.py --client CLIENT --apply`.
-Native hooks attach the session automatically. Codex, Claude, Cursor and Grok
-task-tool hooks inject `context_file`; an Agent does not need a preliminary
-session call. Kimi Code currently supplies context in its prompt hook but has
-no tool-input rewrite, so it is not equivalent to those adapters. Local Codex
-commands can resolve the actual `CODEX_THREAD_ID`, and Claude exports context
-through its session environment. Never guess the task from cwd or history.
-See [MCP and shell context](native-workspace-isolation.md#context-in-mcp-and-shell)
-for the remaining shell-entry limits.
+Configure installed clients once with
+`uv run --no-project python .agents/scripts/vaws_client_setup.py --client all --apply`.
+Native hooks attach the session. Shared project guidance prepares a new task's
+editing workspace and fixed component environment through `vaws_start.py`, unless
+native setup already supplied them. Preparation binds the selected source roots;
+`vaws_session` is not a prerequisite. Resume reuses the original selection.
 
-Kimi Code reads hooks from `~/.kimi-code/config.toml` (or `KIMI_CODE_HOME`)
-and discovers project `.kimi-code/mcp.json`. Setup returns its executable and
-working directory. The legacy Python `kimi-cli` has a different configuration
-contract and is not the Kimi Code client supported by this setup.
+The stable MCP gateway routes task tools to that task's selected coordinator
+package using explicit context or actual native metadata. Codex, Claude, Cursor
+and Grok hooks can supply `context_file`. Official Kimi exposes context through
+its prompt hook and carries it explicitly in startup and all three VAWS providers'
+calls. Never guess identity from cwd or history. See
+[MCP and shell context](native-workspace-isolation.md#context-in-mcp-and-shell).
+
+Kimi Code reads hooks from `~/.kimi-code/config.toml` (or `KIMI_CODE_HOME`).
+Setup configures project and user MCP providers using the supported official
+contract. A personal SessionSetup extension is optional; stock clients do not
+receive unknown hook events. The legacy Python `kimi-cli` is a different client.
 
 | Tool | Meaning |
 |---|---|
-| `vaws_session` | Optional inspection or explicit source-default override; native attachment already binds the actual worktree |
+| `vaws_session` | Optional inspection or explicit source-default override; startup already binds the selected editing roots |
 | `vaws_run` | Submit `command` plus optional `sources` / `env` / `environment` / `resources` / `topology` / `timeout_seconds` / `service` / `restart`. Skills do not pass `request_id` / `profile_key` / `runtime_id` / a Python path |
 | `vaws_execution` | Status, tail, stop, or read the ordinary endpoint of one owned execution |
 | `vaws_finish` | Close admission; stop owned executions; keep container, roots, evidence |
@@ -45,9 +49,10 @@ These observations do not grant resource access. Tail, target and stop keep
 their existing behavior.
 
 Package CLI: `python -m vaws_coordinator.vaws session|run|execution|finish`.
-MCP: `python -m vaws_coordinator task-server`.
+The gateway starts MCP backend `python -m vaws_coordinator task-server` in the
+task's selected environment.
 
-`sources` omitted uses the attachment's selected worktrees; `sources={}` runs
+`sources` omitted uses the effective task source defaults; `sources={}` runs
 without project sources. An explicit map selects sources for that execution.
 Names are not restricted to vLLM repositories. Admission captures fixed Git
 commits including dirty edits without modifying HEAD or the user's index.
@@ -98,19 +103,14 @@ not a per-model launch snippet.
 
 There is no workspace `leases.json` and no `session.json` resource authority.
 
-For a Windows checkout shared with WSL, generated WSL clients use the Windows
-workspace interpreter for task tools and session hooks. Source and context
-paths on mounted drives are normalized by the coordinator. Explicit remote
-tools normally use the client's native interpreter. Kimi Code is the shared
-project-config exception: when the project and Windows environment are on the
-same mounted drive, all three MCP entries use a project-relative Windows
-Python command. The same `.kimi-code/mcp.json` then runs from the project cwd
-in Windows and WSL without being rewritten between launches. Kimi session
-hooks remain in each platform's own Kimi home configuration. Existing custom
-server commands and environment values are preserved. Windows MCP entries
-include the `WSLENV` forwarding list so explicit state and custom environment
-values reach a Windows process launched from WSL. A Linux daemon refuses
-a state directory already owned through Windows IPC.
+For a Windows checkout shared with WSL, task tools and hooks retain the existing
+Windows owner and its selected interpreter. Mounted-drive source and context
+paths are normalized by coordinator. Native gateway generation preserves custom
+server fields and the required environment forwarding; Linux refuses a state
+directory already owned through Windows IPC. This does not imply support for
+native worktree setup from a WSL `/mnt` path. See the
+[platform contract](platform-contract.md) for interpreter and linked-worktree
+boundaries; configuration tests do not replace a real client launch.
 
 ## 3. User container
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exec one user-level MCP provider in the native client's selected workspace.
+"""Serve one MCP provider from each task's selected immutable environment.
 
 Kimi supplies the stdio cwd. Cursor supplies VAWS_MCP_WORKSPACE through its
 native workspace variable. This selects only a saved package environment;
@@ -8,6 +8,7 @@ task identity remains the native attachment and is never inferred here.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -48,15 +49,16 @@ def main(argv=None) -> int:
     parser.add_argument("kind", choices=PROVIDERS)
     args = parser.parse_args(argv)
     try:
-        cwd, command, environment = provider_plan(args.kind, Path.cwd(), dict(os.environ))
-        print(json.dumps({"vaws_native_provider": args.kind, "cwd": str(cwd),
-                          "python": command[0], "receipt": environment[PIN_ENV]}),
-              file=sys.stderr, flush=True)
-        os.chdir(cwd)
-        if os.name == "nt":
-            from vaws_windows import run_owned
-            return run_owned(command, env=environment)
-        os.execve(command[0], command, environment)
+        from vaws_venv import ensure_workspace_interpreter
+        ensure_workspace_interpreter(repo_root=ROOT)
+        from vaws_mcp_runtime import serve
+        native = Path(os.environ.get("VAWS_MCP_WORKSPACE") or Path.cwd()).resolve()
+        try:
+            target = workspace(native, source=ROOT)
+        except ValueError:
+            target = ROOT
+        asyncio.run(serve(args.kind, target))
+        return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"VAWS {args.kind} provider unavailable: {exc}", file=sys.stderr)
         return 1

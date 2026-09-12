@@ -87,12 +87,13 @@ def common_dir(root: Path) -> Path:
 
 
 @contextmanager
-def update_lock(root: Path):
-    """Serialize updates for a Git repository, including linked worktrees."""
+def update_lock(root: Path, *, wait_seconds: float = 0):
+    """Serialize updates; new sessions can wait briefly for shared preparation."""
     from vaws_local_owner import windows_mounted_workspace
     if windows_mounted_workspace(root):
         raise Deferred("windows_owner_required", "run workspace_update.py with the native Windows owner")
-    with (common_dir(root) / "vaws-update.lock").open("a+b") as handle:
+    path = common_dir(root) / "vaws-update.lock"
+    with path.open("a+b") as handle:
         acquired = False
         try:
             if os.name == "nt":
@@ -102,18 +103,31 @@ def update_lock(root: Path):
                 if os.fstat(handle.fileno()).st_size == 0:
                     handle.write(b"0")
                     handle.flush()
-                handle.seek(0)
+            started = time.monotonic()
+            announced = False
+            while not acquired:
                 try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    if os.name == "nt":
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as exc:
-                    raise Deferred("updater_running") from exc
-            else:
-                import fcntl
-                try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as exc:
-                    raise Deferred("updater_running") from exc
-            acquired = True
+                    if os.name != "nt" and not isinstance(exc, BlockingIOError):
+                        raise
+                    elapsed = time.monotonic() - started
+                    if elapsed >= wait_seconds:
+                        detail = (f"workspace preparation is still running after {elapsed:.1f}s; "
+                                  f"lock: {path}") if wait_seconds else ""
+                        raise Deferred("updater_running", detail,
+                                       evidence={"lock": str(path), "waited_seconds": round(elapsed, 3)}) from exc
+                    if not announced:
+                        print("VAWS: waiting for another session's workspace preparation", file=sys.stderr, flush=True)
+                        announced = True
+                    time.sleep(min(0.2, wait_seconds - elapsed))
+                else:
+                    acquired = True
             yield
         finally:
             if acquired:

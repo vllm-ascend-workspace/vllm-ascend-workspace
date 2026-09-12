@@ -24,7 +24,15 @@ def invoke(payload, *, client="codex", project=ROOT):
         code = hook.main()
     assert code == 0
     assert output.getvalue() == "{}\n"
-    assert errors.getvalue() == ""
+    facts = [json.loads(line) for line in errors.getvalue().splitlines()]
+    if hook.in_project(payload, client=client, project=project):
+        assert len(facts) == 1
+        assert facts[0]["event"] == "knowledge_summary"
+        assert facts[0]["client"] == client
+        assert "status" in facts[0]
+    else:
+        assert facts == []
+    return facts
 
 
 def test_capture_receives_existing_summary_without_an_extra_format():
@@ -40,8 +48,11 @@ def test_capture_receives_existing_summary_without_an_extra_format():
 
 def test_capture_error_does_not_interrupt_client():
     with mock.patch.object(hook, "ensure_workspace_interpreter"), \
-         mock.patch("vaws_knowledge_service.service_config", side_effect=OSError("config unavailable")):
-        invoke({"hook_event_name": "Stop", "cwd": str(ROOT), "last_assistant_message": "Existing final response."})
+         mock.patch("vaws_knowledge_service.service_config", side_effect=OSError("config unavailable ghp_exampletoken")):
+        facts = invoke({"hook_event_name": "Stop", "cwd": str(ROOT), "last_assistant_message": "Existing final response."})
+    assert facts[0]["status"] == "failed"
+    assert facts[0]["error_type"] == "OSError"
+    assert facts[0]["error"] == "config unavailable [redacted]"
 
 
 def test_missing_environment_does_not_interrupt_client():
@@ -76,6 +87,22 @@ def test_cursor_workspace_roots_must_stay_in_scope(tmp_path):
     assert not hook.in_project({"workspace_roots": [str(tmp_path)]}, client="codex", project=tmp_path)
     assert not hook.in_project({"cwd": str(tmp_path.parent), "workspace_roots": [str(tmp_path)]},
                                client="cursor", project=tmp_path)
+
+
+def test_cursor_completed_session_end_captures_existing_final_response(tmp_path):
+    transcript = tmp_path / "transcript.jsonl"
+    text = "The completed final response already contains useful task evidence."
+    transcript.write_text(json.dumps({"role": "assistant", "message": {
+        "content": [{"type": "text", "text": text}]}}) + "\n")
+    payload = {"hook_event_name": "sessionEnd", "final_status": "completed",
+               "conversation_id": "actual-session", "workspace_roots": [str(tmp_path)],
+               "transcript_path": str(transcript)}
+    with mock.patch.object(hook, "ensure_workspace_interpreter"), \
+         mock.patch("vaws_knowledge_service.service_config", return_value="shared"), \
+         mock.patch("vaws_knowledge.summary_hook.capture_summary") as capture:
+        invoke(payload, client="cursor", project=tmp_path)
+    assert capture.call_args.args[0] == {**payload, "hook_event_name": "afterAgentResponse", "text": text}
+    assert capture.call_args.kwargs == {"config": "shared", "client": "cursor"}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows path interpretation")

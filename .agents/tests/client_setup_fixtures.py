@@ -8,6 +8,7 @@ import shutil
 import sys
 
 import vaws_knowledge_service
+import vaws_kimi_config
 
 
 def selected_runtime(monkeypatch, setup, tmp_path):
@@ -22,6 +23,7 @@ def selected_runtime(monkeypatch, setup, tmp_path):
     monkeypatch.setattr(vaws_knowledge_service, "managed_receipt", lambda root: receipt)
     monkeypatch.setattr(vaws_knowledge_service, "managed_python", lambda root: sys.executable)
     monkeypatch.setattr(vaws_knowledge_service, "windows_mounted_workspace", lambda root: False)
+    monkeypatch.setattr(vaws_kimi_config, "managed_receipt", lambda root: receipt)
     return receipt
 
 

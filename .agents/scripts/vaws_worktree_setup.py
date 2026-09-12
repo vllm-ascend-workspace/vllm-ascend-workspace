@@ -18,9 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / ".agents/lib"))
 
 from vaws_environment import EnvironmentError, PIN_ENV, MANAGED_PIN_ENV, native_ready, saved_ready, select_environment, _inputs
-from vaws_workspace_entry import copy_workspace_identity, prepare_session, workspace_entry
+from vaws_knowledge_service import prepare_knowledge
+from vaws_session_state import write_json
+from vaws_workspace_entry import copy_workspace_identity, workspace_entry
 from vaws_workspace_update import (Deferred, SUBMODULES, WorkspaceUpdater, clean_checkout, common_dir,
-                                   git, gitlinks, initialized, prepared_source, run, update_lock)
+                                   git, gitlinks, initialized, run, update_lock)
 
 
 def native_paths(client: str, environment: dict, cwd: Path) -> tuple[Path, Path]:
@@ -75,8 +77,19 @@ def configure_target(client: str, target: Path, receipt: dict, environment: dict
     if client == "kimi":
         # One installed Kimi lifecycle adapter routes each native event to its
         # selected environment; a new worktree must not append global hooks.
-        arguments += ["--kimi-config", str(target / ".vaws-local/kimi-hooks.toml"), "--kimi-session-setup"]
+        arguments += ["--kimi-config", str(target / ".vaws-local/kimi-hooks.toml")]
     run(arguments, cwd=target, env={**environment, PIN_ENV: receipt["receipt"]}, timeout=120)
+
+
+def prepare_selected_knowledge(target: Path, receipt: dict) -> dict:
+    """Remember one preparation attempt alongside the existing environment choice."""
+    selection = target / ".vaws-local/environment-selection" / f"{sys.platform}.json"
+    selected = json.loads(selection.read_text(encoding="utf-8"))
+    if isinstance(selected.get("knowledge"), dict):
+        return selected["knowledge"]
+    knowledge = prepare_knowledge(target, receipt=receipt)
+    write_json(selection, {**selected, "knowledge": knowledge})
+    return knowledge
 
 
 def active_submodules(target: Path, revision: str) -> dict[str, str]:
@@ -91,8 +104,8 @@ def active_submodules(target: Path, revision: str) -> dict[str, str]:
 
 
 def advance_worktree(target: Path, prepared: Path, original: str,
-                     branch: str | None, active: dict[str, str]) -> dict[str, str]:
-    """Fast-forward one new checkout and its already-initialized components."""
+                     branch: str | None, active: dict[str, str], *, canonical: bool = False) -> dict[str, str]:
+    """Select prepared inputs in one clean new checkout and its active components."""
     clean_checkout(target, branch=branch, expected={original})
     if active_submodules(target, original) != active:
         raise Deferred("submodule_state_changed")
@@ -108,7 +121,12 @@ def advance_worktree(target: Path, prepared: Path, original: str,
             if not initialized(prepared, path):
                 raise Deferred("submodule_object_unavailable", path)
             git(module, "fetch", "--no-tags", str(prepared / path), sha)
-    git(target, "merge", "--ff-only", revision)
+    if canonical:
+        # This new checkout copied the editing source's HEAD. Its business
+        # history remains in that source; a new task starts at canonical HEAD.
+        git(target, "reset", "--hard", revision)
+    else:
+        git(target, "merge", "--ff-only", revision)
     for path in active:
         git(target / path, "checkout", "--detach", links[path])
     return {path: links[path] for path in active}
@@ -136,17 +154,17 @@ def default_branch_snapshot(source: Path, original: str) -> dict | None:
             "native_ref_selection": "unavailable"}
 
 
-def prepare_default_snapshot(source: Path, baseline: dict) -> tuple[dict, Path | None]:
+def prepare_canonical(source: Path, baseline: dict | None = None) -> tuple[dict, Path | None]:
     """Use existing preparation without requiring the editing source on main."""
     result = workspace_entry(source)
     if result["state"] != "configured":
         return result, None
-    with update_lock(source):
+    with update_lock(source, wait_seconds=180):
         updater = WorkspaceUpdater(source)
         result = updater.step(apply=True, activate=False)
         if result.get("status") not in {"ready", "current"}:
             return result, None
-        if "refs/heads/" + result["branch"] != baseline["ref"]:
+        if baseline is not None and "refs/heads/" + result["branch"] != baseline["ref"]:
             return {"status": "kept", "reason": "default_branch_changed"}, None
         if updater.state.get("phase") not in {"ready", "active"}:
             return result, None
@@ -182,6 +200,7 @@ def prepare_worktree(client: str, source: Path, target: Path, *, preserve_source
         # that bounded step without changing the saved version or its inputs.
         configure_target(client, target, receipt, environment)
         return {"status": "reused", "workspace": str(target), "environment": receipt["key"],
+                "knowledge": prepare_selected_knowledge(target, receipt),
                 **({"update": {"status": "kept", "reason": "fork_source"}} if preserve_source else {}),
                 **({"identity": identity} if identity else {})}
 
@@ -190,6 +209,7 @@ def prepare_worktree(client: str, source: Path, target: Path, *, preserve_source
     result = {"status": "kept", "reason": "explicit_source"}
     baseline = None
     prepared = None
+    from_current_source = False
     submodules = {}
     # Native clients may create a task from an explicitly selected older or
     # business commit. Preserve that choice, as well as copied local edits.
@@ -201,14 +221,15 @@ def prepare_worktree(client: str, source: Path, target: Path, *, preserve_source
         if client == "codex" and branch is None:
             baseline = default_branch_snapshot(source, original)
         if baseline is not None:
-            result, prepared = prepare_default_snapshot(source, baseline)
+            result, prepared = prepare_canonical(source, baseline)
         elif original == git(source, "rev-parse", "HEAD"):
-            result = prepare_session(source)
-            prepared = prepared_source(source)
+            from_current_source = True
+            baseline = {"kind": "source_head_snapshot", "head": original, "native_ref_selection": "unavailable"}
+            result, prepared = prepare_canonical(source)
         if prepared is not None:
             # Only this newly supplied worktree moves. Recheck after potentially
             # slow preparation so an intervening edit stays with its author.
-            submodules = advance_worktree(target, prepared, original, branch, active)
+            submodules = advance_worktree(target, prepared, original, branch, active, canonical=from_current_source)
     except Deferred as exc:
         result = {"status": "kept", "reason": exc.reason}
         prepared = None
@@ -224,6 +245,7 @@ def prepare_worktree(client: str, source: Path, target: Path, *, preserve_source
     select_environment(target, receipt)
     return {"status": "ready", "workspace": str(target), "head": git(target, "rev-parse", "HEAD"),
             "environment": receipt["key"], "update": result, "submodules": submodules,
+            "knowledge": prepare_selected_knowledge(target, receipt),
             **({"identity": identity} if identity else {})}
 
 

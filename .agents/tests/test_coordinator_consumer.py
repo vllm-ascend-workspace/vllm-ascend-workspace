@@ -473,7 +473,8 @@ class ClientSetupTests(unittest.TestCase):
         self.assertEqual(data["mcp_servers"]["remote_dev"]["command"], "user-command")
         self.assertEqual(data["mcp_servers"]["remote_dev"]["args"], ["user-argument"])
         self.assertEqual(data["mcp_servers"]["other"], {"command": "other-command"})
-        self.assertEqual(data["mcp_servers"]["vaws_task"]["args"], ["-m", "vaws_coordinator", "task-server"])
+        self.assertEqual(data["mcp_servers"]["vaws_task"]["args"],
+                         [str(self.setup.ROOT / ".agents/scripts/vaws_native_mcp.py"), "task"])
         config.write_text(files[config])
         self.assertNotIn(config, self.setup.configuration("codex", self.project))
 
@@ -724,9 +725,11 @@ class HookAdapterTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(len(list((registry / "contexts").glob("*.json"))), 1, proc.stderr)
+            contexts = list((registry / "contexts").glob("*.json"))
+            self.assertEqual(len(contexts), 1, proc.stderr)
             hint = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
-            context_file = Path(hint.splitlines()[1])
+            context_file = contexts[0].resolve()
+            self.assertIn(str(context_file), hint)
             self.assertTrue(context_file.is_file())
             self.assertEqual(context_file.parent.parent.resolve(), registry.resolve())
 

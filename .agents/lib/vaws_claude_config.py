@@ -35,6 +35,29 @@ def owned_entry(path: str, root: Path, name: str) -> bool:
     return same_repository(candidate.parents[2], root)
 
 
+def provider_kind(arguments, root: Path) -> str | None:
+    if not isinstance(arguments, list) or not all(isinstance(value, str) for value in arguments):
+        return None
+    kind = KINDS.get(tuple(arguments))
+    if kind is not None:
+        return kind
+    if len(arguments) == 2 and arguments[1] in KINDS.values() and any(
+        owned_entry(arguments[0], root, name) for name in ("vaws_native_mcp.py", "vaws_claude_entry.py")
+    ):
+        return arguments[1]
+    return None
+
+
+def wrapped_hook_kind(argv: list[str], root: Path) -> str | None:
+    """Recognize only the command forms emitted by Claude setup."""
+    if (len(argv) not in {3, 5} or not owned_entry(argv[1], root, "vaws_claude_entry.py")
+            or argv[2] not in {"session", "summary"}):
+        return None
+    if len(argv) == 5 and (argv[3] != "--agent-sessions-dir" or not argv[4]):
+        return None
+    return argv[2]
+
+
 def add_claude_setup(files: dict, notes: list, project: Path, root: Path, *,
                      shell_command, parse_command, owned_server) -> None:
     """Adapt the already-merged plan, including old generated configurations."""
@@ -49,7 +72,7 @@ def add_claude_setup(files: dict, notes: list, project: Path, root: Path, *,
     python = None
     for name, server in servers.get("mcpServers", {}).items():
         arguments = server.get("args", [])
-        kind = KINDS.get(tuple(arguments))
+        kind = provider_kind(arguments, root)
         already_wrapped = len(arguments) == 2 and owned_entry(arguments[0], root, "vaws_claude_entry.py")
         if already_wrapped and arguments[1] in KINDS.values():
             kind = arguments[1]

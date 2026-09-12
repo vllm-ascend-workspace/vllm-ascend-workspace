@@ -2,171 +2,121 @@
 
 Status: current
 
-默认接入客户端自己的会话生命周期。初始化时一次选好原生 Worktree 模式和
-环境；之后用户正常创建会话，客户端创建目录并运行 setup，再让 Agent 开始
-操作。setup 为符合条件的新目录检查主仓、采用准备好的代码，并固定配套依赖
-和客户端接线。SessionStart 自动关联实际会话与 cwd，Agent 不需要先调用
-VAWS 启动 CLI 或填写会话记录。已有目录和恢复会话保留代码、任务身份和环境。
+官方 Codex、Cursor、Claude Code、Grok 和 Kimi Code 共用项目启动指引。
+首次初始化配置客户端 hooks、MCP providers 和项目指引；用户照常创建会话，
+无需调用 Skill、选择额外 VAWS 启动器或安装个人客户端补丁。原生 worktree
+setup 是可复用的优化，不是所有客户端都必须具备的前置能力。
 
-普通 Local 会话仍在客户端选定的目录中，不会由 hook 强制变成 worktree。
-客户端选目录，setup 准备这个尚未开始工作的目录，session hook 记录原生身份；
-三个时点各自承担明确职责。
+## 新建与恢复
 
-首次初始化统一运行 `vaws_client_setup.py --client all --apply`。它按已安装的客户端
-配置接线和原生支持的默认偏好，保存逐客户端结果，并在同一次初始化中列出仍需
-原生界面完成的操作。Agent 可用客户端工具或 computer use 完成这些操作；没有
-接口的项目明确报告，不把生成配置文件算作启用。普通业务会话不运行此命令，
-不会逐次扫描客户端、核对状态或补登记。原生信任仍由客户端处理。
+新任务有两条准备路径：
 
-## 原生接入范围
+- 客户端已创建独立 worktree，且 setup 已提供选定环境：直接使用这个目录。
+- 普通项目目录中的新会话：项目指引让 Agent 的第一个仓库操作运行一次
+  `uv run --no-project python .agents/scripts/vaws_start.py --client CLIENT`。
+  官方 Kimi 加上原生 hook 已提供的 `--context-file PATH`。
 
-| 客户端 | 已接入的生命周期 | 当前边界 |
+`CLIENT` 是 codex、cursor、claude、grok 或 kimi。命令复用当前原生 task，
+在母仓外的同级位置准备独立编辑目录，选择 canonical main 的精确提交及其锁定
+组件环境，显式绑定 sources，并返回 `workspace`、`head`、`environment` 和
+`context_file`。同一 task 重复调用复用已保存结果，不再次 fetch、安装或换目录。
+初始化状态由命令在本地读取；只有缺少首次配置时才返回 setup 提示，不让 Agent
+每次检查身份文件。多个会话同时准备时，命令显示并等待仓库更新锁，超时才返回
+等待时长和锁文件证据。
+它不是通用客户端 launcher，也不解析客户端的 resume 参数。
+
+后续 shell 使用返回目录作为 cwd，或者在命令中使用 `cd W && ...`；文件、搜索
+和 patch 使用该目录中的绝对路径。客户端 UI 和默认 cwd 可以保留原项目。
+这能完成隔离编辑，不声称子进程 `cd` 可以改变父客户端或所有工具的默认根目录。
+Grok 默认会过滤主仓内被忽略的目录，因此新编辑目录放在母仓外，不要求关闭
+Git ignore 或放宽全局权限。
+
+resume 沿用既有 task、编辑目录、sources 和环境，不调用新的准备流程。
+已经接纳的执行继续使用自己的固定输入。新建时失败返回阶段、原因和证据；
+不能把未准备成功的目录标为 ready，也不自动 stash、reset 或 rebase 用户工作。
+
+## 客户端接线
+
+`vaws_client_setup.py --client all --apply` 一次配置实际已安装的客户端，保留
+用户自定义 provider、hook 和指引。结果保存在主工作树的
+`.vaws-local/client-initialization.json`；它不是每个任务的检查清单。
+原生信任和审批仍由客户端处理，配置生成不等于真实会话验收。
+
+| 客户端 | 普通新会话指引与 context | 可复用的原生能力 |
 |---|---|---|
-| Codex App | 选定 local environment 的 setup 准备客户端新建 worktree；用户级 SessionStart 关联 VAWS | 一次选择 Worktree 和 VAWS 环境；客户端按主机和项目目录记住模式，后续同项目会话沿用。使用 --codex-global-hooks 并原生审阅固定 hook。创建任务 API 使用原生保存的环境选择；仅写配置文件或 Git key 不等于选定。 |
-| Cursor | worktrees.json 的 setup-worktree 准备新目录；sessionStart / preToolUse 自动关联 | 一次将 Default Environment 选为 New Worktree，并使用 --cursor-global-mcp 安装用户级 VAWS providers；新目录无需重复启用项目 MCP。 |
-| Claude Code | WorktreeCreate 创建并准备目录；SessionStart 关联；MCP/Hook 启动时读取实际目录的固定环境 | 使用原生 worktree 模式。2.1.269 已验证新建与从母仓恢复；旧 2.1.143 跨目录恢复存在客户端问题。 |
-| Grok | 原生 Git worktree 创建触发项目 post-checkout；SessionStart / PreToolUse 自动关联 | 全客户端初始化一次将 cli.worktree_type 设为 git，new_session_worktree_mode / fork_worktree_mode 设为 always。普通启动还需要已验收的原生补丁；单客户端接线保留全局偏好。已有 Git hook 保留给其 owner 集成。 |
-| Kimi Code | 官方 0.42.0 的 SessionStart 只关联；带 SessionSetup 扩展的个人 fork 能在创建 workspace/MCP 前准备目录 | 扩展需单独安装并显式启用，不能将官方版本描述为已支持。新建、恢复、Bash/MCP 与子 Agent 使用原生身份。 |
+| Codex | AGENTS.md；MCP 的真实 thread metadata 或 hook 关联当前 task | App local environment setup 准备客户端创建的 worktree；固定用户 hooks 避免每个目录重复安装 |
+| Cursor | AGENTS.md 和 alwaysApply 项目规则；sessionStart / preToolUse 自动关联与注入 context | worktrees.json setup 准备新目录；用户级 providers 接收原生 workspaceFolder |
+| Claude Code | CLAUDE.md 导入 AGENTS.md；SessionStart 导出 context，PreToolUse 注入 | WorktreeCreate 可准备客户端选用的原生 worktree；薄入口保留真实调用者 |
+| Grok | 原生读取 AGENTS.md；Bash 提供 GROK_SESSION_ID，PreToolUse 注入 context | Git worktree 创建回调及原生 /new、/fork 偏好；普通入口不依赖个人修复版 |
+| Kimi Code | 原生读取 AGENTS.md；UserPromptSubmit 提供 context_file；准备命令和三个 VAWS provider 的调用显式携带它 | 显式启用的 SessionSetup 扩展可提前选目录，官方配置只使用受支持事件 |
 
-Codex 的[本地环境 setup](https://learn.chatgpt.com/docs/environments/local-environment)
-和 Cursor 的[worktree setup](https://cursor.com/docs/configuration/worktrees)在工作开始前
-准备目录。Claude 的[WorktreeCreate](https://code.claude.com/docs/en/hooks#worktreecreate)
-返回客户端采用的路径；部分版本提前读取 MCP 配置，因此生成的薄启动入口只按
-实际 cwd 读取已经选好的 receipt，再执行对应组件，不在启动时更新代码。
+Grok 的 SessionStart stdout 不会成为模型提示，因此启动入口放在客户端真实
+读取的项目指引中。Kimi 官方 Bash 有 cwd 参数，Read/Write/Edit 支持绝对路径；
+无需假定存在会话中途改根 API。客户端仍按自己的审批机制处理文件访问。
 
-Codex 按配置来源和定义内容记录 hook 信任。初始化将本仓生成的 hook 迁移到
-用户级固定入口，保留自定义 hook；新 worktree 的 setup 自动去掉重复的项目入口。
-固定入口只处理同一 Git 公共目录的原生 cwd，读取该目录已经选好的环境和任务
-设置，再运行组件 hook。新目录和依赖版本不会改变这条入口定义，正常会话无需
-重复信任。配置生成本身不授予信任；新定义仍需按原生机制审阅。
+原生机制分别见 [Codex local environment](https://learn.chatgpt.com/docs/environments/local-environment)、
+[Cursor worktrees](https://cursor.com/docs/configuration/worktrees)、
+[Claude WorktreeCreate](https://code.claude.com/docs/en/hooks#worktreecreate)
+和 [Kimi hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)。
+具体已测版本记录在 dated 验收文档，不能从配置规划测试推断所有新客户端均已通过。
 
-Grok 的原生补丁让普通新会话也消费自动 worktree 偏好，恢复沿用原目录；
-官方版本的相同偏好只覆盖 /new 和 /fork。Git 创建回调只处理 Grok
-目录下刚创建的 linked worktree，普通 checkout 和其他客户端目录不受影响。
-默认的复制模式不触发这个回调。正式版 1.0.30 在 worktree 内连续 /new 或
-/fork 的目录判断仍有客户端缺陷；已安装的个人修复版基于公开源码 1.0.24，
-保留官方二进制供回退。补丁来源与实测范围见验收记录。
-
-全客户端初始化保护已确认的个人客户端扩展：Grok 的安装记录与实际二进制
-匹配且已有启动/恢复验收时，设置原生 `[cli] auto_update = false`；Kimi 的实际
-parser 确认支持 SessionSetup 时，在原生 `$KIMI_CODE_HOME/tui.toml`（默认
-`~/.kimi-code/tui.toml`）设置 `[upgrade] auto_install = false`；这与运行配置
-`config.toml` 和 `--kimi-config` 无关。
-这避免官方自动安装覆盖已验收补丁。官方版或未确认构建保留原有更新设置；
-单客户端和每会话接线不调整这些偏好。
-
-Grok 还会兼容导入 Cursor MCP，但不能消费 Cursor 的 workspaceFolder 替换。
-全客户端初始化在确认三个 VAWS Cursor 入口由本仓生成、且已有有效 Grok
-入口时，将这些重复名称加入 Grok 用户级 disabled_mcp_servers。Cursor
-配置和其他兼容导入保留；自定义同名入口交给 Agent 判断。
-
-Kimi 官方[会话 hook](https://moonshotai.github.io/kimi-code/en/customization/hooks)
-执行时 cwd 已经确定，现有插件不能替换它。个人客户端扩展增加一个有界的
-SessionSetup：在原生 workspace/MCP 创建前消费返回 cwd；恢复沿用原目录。
-原生分叉使用新目录和新身份，保留当前暂存、未暂存、普通未跟踪内容、已初始化
-子模块和会话历史。分叉沿用原 HEAD 与已选环境，不检查上游；普通新会话继续
-执行启动时更新。历史位置分叉保持客户端原有的对话截断语义，不回滚当前文件。
-消费端通过 `vaws_client_setup.py --client kimi --kimi-session-setup --apply`
-显式接入，普通官方客户端配置不会包含未知事件。现有信任策略仍由客户端处理。
-扩展模式同时配置用户级 VAWS providers，避免每个新目录重复进行项目 MCP
-初始化。Cursor 的用户级入口通过原生 `${workspaceFolder}` 获得目录，Kimi
-通过原生进程 cwd 获得目录；两者只读取该目录已准备的环境 receipt，再启动
-固定的三个组件。自定义服务器保留，工作目录不会被用于推断任务身份。
-实际通过的任务、所用版本和剩余边界见
-[原生客户端验收](native-client-validation-2026-09-12.md)。
+初始化不再因个人二进制缺失而阻塞，也不为保护补丁关闭客户端自动升级。
+Kimi 普通配置会替换本仓精确拥有的旧 SessionSetup 回调，保留用户项；
+`--kimi-session-setup` 仅用于明确选用的扩展。Grok 的兼容导入去重只处理已确认由
+本仓生成、且存在有效替代的三个 Cursor provider 名称，不影响其他用户配置。
 
 ## Context in MCP and shell
 
-MCP 工具参数和 shell 子进程环境是不同的入口。Claude、Cursor、Grok
-的 task-tool hook 可在内部注入 context。Codex 的原生 MCP 调用通过
-`_meta.x-codex-turn-metadata.thread_id` 传递真实调用者，coordinator 查找
-SessionStart 已建立的关联；`functions.exec` 内的调用也无需手动传 context。
-直接工具调用仍可使用已有的 task-tool hook。Kimi 扩展直接在 MCP tools/call 的
-_meta 携带原生 session/agent ID，coordinator 查找已有的对应 attachment；
-不使用共享 MCP 进程自己的 session，也不从目录猜测用户或任务。
+原生会话身份、编辑目录和组件进程是三个不同对象。目录或最近会话不能证明
+任务身份。原生 hooks 建立 attachment；显式 context 或客户端提供的 native
+metadata 选择这个 attachment。工具收到的 context 与原生调用者冲突时返回事实。
 
-普通 skill CLI 复用 VAWS_CONTEXT_FILE。Codex、Cursor、Grok、Kimi 扩展还能按
-客户端提供的真实原生 ID 解析同一关联；Claude 通过 CLAUDE_ENV_FILE 导出
-context 和固定 receipt。Kimi 字面 main 表示根 Agent，其余 child ID 必须精确
-对应已存在的 attachment。Cursor shell 提供的 CURSOR_CONVERSATION_ID
-支持原生 UUID 会话自动关联；被编码或截断的非 UUID 值直接返回事实，不猜测
-原始身份。MCP 与 shell 的无参调用已分别验证，Agent 无需搬运 context 参数。
+MCP 使用稳定的 `vaws_native_mcp.py` gateway。它按当前 task 的固定选择启动或
+复用 task、remote-dev 和 knowledge 后端，不实现这些包的业务功能。已有长活
+MCP 连接可以服务另一个新 task 的新环境；恢复旧 task 仍调用它原来的环境。
+因此更新不要求 Agent 每次手工重连，也不在旧任务工作中热换包版本。
 
-MCP 同时在 text 和 structuredContent 返回相同的紧凑事实；full=true 才展开
-完整记录。只读取 text 的客户端也能看到任务、来源、失败原因和原始记录引用。
+Codex 使用真实 thread metadata；Claude、Cursor、Grok 的 PreToolUse 可以补入
+context。Cursor 的已观测 MCP:toolName 形式也用于固定的 knowledge 工具和
+remote 工具。官方 Kimi 没有同等的透明 native metadata，调用三个 VAWS provider
+时带已有 `context_file`。其他客户端若工具报告缺少 context，复用已有值即可，
+不用事先检查每次是否注入。gateway 会在转发非 task 工具前去掉这个路由字段。
+Kimi 的工具 schema 将此字段声明为必填，避免先失败一次才补入上下文。
 
-## 目录、身份与固定输入
+shell 与 MCP 的身份传递各自独立。shell 优先读取 VAWS_CONTEXT_FILE 或客户端
+提供的原生 ID；官方 Kimi 使用 hook 返回的显式 context。Bash 的一次 cd 不被
+当作身份、sources 或 MCP 版本变更。
 
-| 对象 | 所有者与边界 |
-|---|---|
-| 本地文件、HEAD、index | 原生客户端选择的 Git 工作目录 |
-| 原生会话与 task attachment | coordinator 的原生身份记录；目录名称不授予关联或资源权限 |
-| 已接纳执行的源码、环境、资源 | coordinator；后续本地编辑不会改变固定输入 |
-| 本地 Python 与客户端配置 | 消费者环境准备和 wiring |
+## 固定环境与共享知识
 
-SessionStart hook 可以记录实际 cwd 和关联来源，其子进程不能通过切换目录
-移动父客户端。原生 setup 只准备客户端传入的新目录，不另建第二份编辑副本。
-Cursor 的 preToolUse 可在 SessionStart 尚未完成时幂等建立同一个关联，并为
-托管调用注入 context；先后顺序无需 Agent 排错。恢复使用明确的原生会话 ID。
-缺失的旧目录、冲突的身份和不支持的来源直接返回事实，不按最近会话猜测。
+工作区提交及锁文件决定组件组合，准备完成后环境不可变。新任务的
+`.vaws-local/tasks/<task-id>/start.json` 保存选定结果；原生已准备的 worktree
+也可通过自己的环境选择被复用。gateway 按这个 task 选择后端，不从“最新环境”
+推断旧 task 的版本。后端 stderr 保留在主工作树的 `.vaws-local/mcp/providers/`，
+并记录实际解释器、环境键、目录和 receipt。
 
-客户端拥有 worktree 的 Git/index 与创建方式。setup 只采用能快进的准备版本，
-保留显式旧提交、业务来源和脏内容；未初始化的空子模块保持未初始化，不拉取
-轻量任务不需要的源码。当前回调要求来源和目标是同一 Git 公共目录下的不同
-工作目录，并且目标是新 worktree 根目录。条件不满足时返回具体原因。
+同一 Git 工作区的各会话共享知识 service 配置、项目知识快照、candidate 和
+索引；模型下载复用知识包缓存。新工作树不另建一套知识库。共享知识内容可由
+知识包维护更新，但 task 使用的组件版本保持固定。查询和捕获按需使用，不要求
+额外维护命令、轮询或重复总结。用户选择的知识挂载和发布设置保留。
+原生回复事件自动保存已有最终文本。Kimi Stop 和 Cursor 命令行 SessionEnd
+不直接携带这段文本时，适配器只读取该事件明确对应的会话记录尾部，提取已完成
+的最终回复；不扫描其它会话，也不要求 Agent 再总结。
 
-Hook 通过 Git common directory 识别关联仓库，不能用字符串父目录关系把
-嵌套的另一仓库当作同一项目。执行来源优先级为：本次 run 指定的 sources、
-显式 task 默认值、该 attachment 的自动来源。更新 attachment 的 cwd 不覆盖
-其他 attachment，也不改变已接纳执行。SessionStart 创建本地 VAWS task，
-不因此占用远端容器、设备或端口；这些能力在实际执行需要时参与。
+来源优先级为本次 run 显式 sources、task 显式默认值、attachment 自动来源。
+更新 attachment 的实际 cwd 不覆盖 task 的显式工作树，也不改变已接纳的执行。
+SessionStart 只建立本地关联，不因此分配容器、NPU 或端口。
 
-## 固定的本地环境
+## 平台与验收
 
-依赖环境由平台、架构、实际 Python/ABI、lock 和有效依赖选择决定内容键。
-相同输入复用已经完成的环境；显式 sync 构建缺失环境。原生新 worktree 的
-setup 可在 Agent 开始前准备新环境；已有目录和恢复会话读取原环境的 ready
-receipt，不安装依赖或运行全量 doctor。已发布环境不原地升级或搬迁。
-
-新目录中的 Hook/MCP 配置固定解释器和 receipt；业务入口从该目录的环境选择
-读取依赖，无需 Agent 执行 shell 激活。不将 setup 子进程的环境变量当成已经
-传回父 GUI 客户端的事实。依赖变更通过更新项目声明并 sync 准备另一环境，
-不能用 pip 原地修改共享已发布环境。
-
-WSL 原生 Python 与 Windows 托管 owner 分别固定，避免运行中修改 lock 后
-切换另一方版本。共用配置所需的相对 Windows Python 链接按内容键生成且不改向。
-新编辑目录继承依赖选择，不复制任务执行状态或资源记录。客户端信任和审批
-遵循用户授权，由客户端自身配置；setup 不默默更改这些策略。
-
-## Windows 与 WSL
-
-共享 Windows owner 使用它能访问的 mounted-drive 来源。原生新 worktree
-setup 需要由 Windows owner 执行；当前从 WSL 的 /mnt 目录调用会返回该边界，
-不自动混用两端的 Git linked-worktree 指针。Linux home 中的原生目录不自动
-获得 Windows owner 可访问性。本轮不扩大混合系统原生 worktree 的支持承诺。
-Kimi 用户级 provider 使用 Windows owner 的绝对解释器和入口路径，避免换
-worktree 后解析母目录的相对链接；该配置供原生 Windows 客户端执行，不能
-同时当作 WSL Linux 客户端的启动命令。路径生成测试不替代 Windows 实机验收。
-独立 Linux、macOS 和 Windows 的行为以相应测试与实机证据为准。完整合同见
+Windows 和 WSL 沿用已有 owner 边界。共享 Windows 挂载目录的原生 worktree
+setup 由 Windows owner 执行；从 WSL 的 /mnt 路径调用不代表已支持跨系统
+linked-worktree。路径与配置测试不替代 Windows 实机验收。完整边界见
 [platform-contract.md](platform-contract.md)。
 
-## 可选 CLI 便利入口
+[2026-09-12 原生验收](native-client-validation-2026-09-12.md)记录旧方案的已测范围；
+[本轮统一启动验收](unified-session-validation-2026-09-13.md)单独记录新入口、
+组件路由、知识共享和 resume 的完成情况。
 
-`vaws_client.py` 适用于希望从终端启动已安装 CLI 的用户，不是原生客户端或
-Agent 日常创建会话的前置步骤：
-
-```text
-uv run --no-project python .agents/scripts/vaws_client.py codex
-uv run --no-project python .agents/scripts/vaws_client.py kimi --workspace PATH
-```
-
-此入口创建独立 Git 副本，在创建前使用同一更新器；已有显式目录直接复用。
-原生参数和恢复 ID 放在 `--` 之后；恢复须带原 `--workspace PATH`，入口不按
-ID 猜测历史目录。复制保留 HEAD、暂存与工作区变更、普通未跟踪文件、有效
-换行/文件模式及已初始化子模块的独立 Git 状态；不复制私有运行状态和被忽略
-内容。含非 Git 内容的未初始化 gitlink、冲突或稀疏 index 等状态明确失败。
-
-这些副本有独立 `.git`，区别于客户端自己的 linked worktree。挂载盘复制由
-已有 Windows owner 完成，避免两端解释绝对 Git 指针。入口在启动子 CLI 前
-设置 cwd、PATH 和 VIRTUAL_ENV，并清除父任务身份；这是该便利入口的能力，
-不代表任意 GUI setup 子进程可以改动父应用的环境。
+`vaws_client.py` 仍是可选终端便利入口，用于在启动一个新的客户端进程前选目录；
+正常新会话使用上述项目指引。其存在不改变客户端内部 /new 或 resume 的原生语义。

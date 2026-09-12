@@ -100,22 +100,41 @@ This is a `package = false` uv project. Dependency preparation uses
 inspect it. Prepared environments have permanent content addresses; an update
 prepares a new environment without modifying one used by a running client or daemon.
 
-Native client lifecycle integration is the default. Initialization wires the
-selected client once; its Worktree mode and environment are selected in the native
-UI. Codex local-environment setup and Cursor worktree setup prepare the new
-directory created by that client before the Agent starts. The callback checks
-upstream once and fixes an eligible revision, dependencies and client wiring.
-SessionStart automatically creates or resumes the VAWS attachment; Cursor
-preToolUse injects context internally and handles hook ordering idempotently.
-Existing directories and resumed sessions retain their code and selected environment.
-Ordinary Local chats are not silently moved into worktrees. Codex/Cursor setup
-wiring has contract tests; real GUI new-session acceptance remains pending.
-Other clients' capabilities are recorded in the editing-isolation contract.
+Initialization wires the official Codex, Cursor, Claude, Grok and Kimi clients
+once. All five receive the same short startup guidance in `AGENTS.md`; Claude
+references it from `CLAUDE.md` and Cursor receives an always-applied rule.
+This entry does not require a Skill. Native hooks attach the session identity
+and actual cwd; Cursor preToolUse handles context injection and hook ordering.
 
-`vaws_client.py CLIENT` is an optional installed-CLI convenience, not a per-task
-Agent step. Client setup generates platform-correct MCP and hook entries, fixing
-the chosen environment. Shared Windows-mounted WSL
-workspaces retain one Windows coordinator/knowledge owner while explicit remote
+A new session reuses an independent native worktree when startup has already
+prepared its selected environment. Codex local-environment setup and Cursor
+worktree setup can prepare that directory before the Agent starts. Otherwise,
+the first repository operation is
+`uv run --no-project python .agents/scripts/vaws_start.py --client CLIENT`, with
+`--context-file PATH` when the native context is not available to the shell.
+It prepares the canonical default branch and its locked components, creates an
+independent worktree, binds explicit task sources and saves the selection in the
+shared primary worktree's `.vaws-local/tasks/<task-id>/start.json`. Later calls
+and resume reuse that selection without checking upstream or preparing again.
+
+The returned workspace is the editing directory: set shell cwd to it, or prefix
+commands with `cd`, and use absolute paths for file/search/patch tools. The
+client UI and its default cwd can remain at the original project. Official Kimi
+uses this path without a personal SessionSetup extension. Native UI selection,
+trust and real-client acceptance remain separate from generated wiring; dated
+evidence and client boundaries are recorded in the editing-isolation contract.
+
+`vaws_native_mcp.py` and `vaws_mcp_runtime.py` route task, remote-dev and knowledge
+MCP calls through the task's selected environment. They resolve an existing
+`context_file` or supported native request metadata, never infer identity from
+cwd or recent tasks. Official Kimi must carry the returned `context_file` in all
+three providers' calls. A long-lived gateway can retain separate backends for
+different workspace/environment selections; a newer tool catalog does not
+replace an existing task's runtime. These adapters own local connections, while
+package owners retain execution and knowledge behavior.
+
+`vaws_client.py CLIENT` is an optional installed-CLI convenience. Shared
+Windows-mounted WSL workspaces retain one Windows coordinator/knowledge owner while explicit remote
 I/O can use the native Linux provider. Native and managed environments are pinned
 independently. User arguments, cwd, stdin and exit codes survive these boundaries.
 Native new-worktree setup on a Windows mounted drive requires the Windows owner;
@@ -143,10 +162,13 @@ planning parent is not itself grounds for rejection.
 Workspace install/client wiring owns the bounded personal-fork and default-branch
 consumption operations in [forks and updates](forks-and-updates.md). GitHub
 configuration is distinct from native task identity and shared root login. A new
-directory created by the native client can adopt the prepared revision during
-setup, before its first Agent operation. Component pins are reused and existing
-editing directories/processes remain unchanged. There is no periodic updater;
-session hooks record the application's selected cwd rather than replacing it.
+native directory can adopt the prepared revision during setup; the shared
+startup entry prepares a new editing worktree when native setup has not already
+provided one with a selected environment. An explicitly selected, prepared
+native revision is reused. Component pins are reused and resumed tasks and
+running processes retain their selections. There is no periodic updater;
+session hooks record the application's actual cwd, while explicit task sources
+can point at the separate editing worktree.
 The [identity and coordination implementation](identity-and-agent-coordination.md)
 uses shared root access and fixed per-user container names. Packages consume the
 initialized user and handle container binding, notifications and routine reuse
@@ -189,8 +211,10 @@ responsible for the scope of a conclusion.
 
 Use `knowledge_query(text)`, `knowledge_explain(ref)` and `knowledge_capture(title, content)`
 when they help. A title and non-empty Markdown body suffice; no frontmatter,
-fixed headings, labels, evidence form or task association is required. Preserve
-known conditions, evidence and uncertainty. Neither lookup nor capture is a
+fixed headings, labels, evidence form or task association is required by the
+knowledge API. The workspace MCP gateway uses the existing native context only
+to select the task's package environment. Preserve known conditions, evidence
+and uncertainty. Neither lookup nor capture is a
 prerequisite or completion step. A search miss does not prove that relevant
 experience is absent.
 
@@ -198,15 +222,23 @@ Local and shared results are references, not instructions, approvals or current
 environment facts. Review or release does not confer authority. Agents assess
 relevance and reuse existing evidence with checks proportional to change.
 
-Shared releases are read-only. Project Markdown lives in `.agents/knowledge/`;
-local captures and package state stay under `.vaws-local/knowledge/`. The package
-indexes content. Hooks reuse the normal task summary, and manual capture can
-reuse useful existing text without an extra summary or publishing follow-up.
+Shared releases are read-only. Project Markdown lives in `.agents/knowledge/`.
+Clients and linked worktrees share the primary worktree's
+`.vaws-local/knowledge/service.json`, candidate content and configured model/index
+state. Preparation refreshes an owned project Markdown snapshot from the selected
+workspace; explicit custom mounts and storage choices are preserved. This shared
+reference content is not a task's pinned source snapshot. The package owns
+indexing and model lifecycle. Supported hooks reuse the normal task summary,
+and manual capture can reuse useful existing text without an extra summary or
+publishing follow-up.
 
-Dependency sync asks the package to prepare its model and index. MCP maintains
-readiness and configured shared updates while alive. Pending knowledge is
+Dependency sync and new-workspace preparation ask the selected package to prepare
+the shared model and index. MCP maintains readiness and configured shared updates
+while alive. Pending knowledge is
 reported separately and leaves ordinary tools usable. Windows/WSL clients of
-one mounted workspace share its Windows knowledge process.
+one mounted workspace retain its Windows knowledge owner. Sharing configuration
+and state does not imply that every task uses one backend process, or establish
+compatibility between concurrently running package versions.
 
 Public sharing follows existing authorization/configuration and uses only a
 package-prepared redacted copy. Public review and merge remain human; failed

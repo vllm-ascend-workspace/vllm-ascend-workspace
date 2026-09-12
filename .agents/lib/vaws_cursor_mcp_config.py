@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from vaws_environment import PIN_ENV, MANAGED_PIN_ENV
+from vaws_claude_config import provider_kind
 from vaws_workspace_update import common_dir
 
 KINDS = {
@@ -76,7 +77,7 @@ def add_cursor_global_mcp(files: dict, notes: list, project: Path, root: Path, *
         if name not in NAMES or not isinstance(server, dict):
             continue
         args = server.get("args", [])
-        kind = KINDS.get(tuple(args)) if isinstance(args, list) and all(isinstance(v, str) for v in args) else None
+        kind = provider_kind(args, root)
         if kind is None or not owned_server(server, project):
             continue
         existing = global_servers.get(name)

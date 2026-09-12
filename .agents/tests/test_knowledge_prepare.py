@@ -91,10 +91,11 @@ def test_prepare_uses_installed_cli_and_preserves_readiness(tmp_path, monkeypatc
     calls = []
     monkeypatch.setattr(knowledge, "knowledge_owner_python", lambda root: sys.executable)
     monkeypatch.setattr(knowledge, "knowledge_owner_env", lambda root: {"KNOWLEDGE_OWNER": "native"})
+    monkeypatch.setattr(knowledge, "shared_workspace_root", lambda root: root)
     monkeypatch.setattr(knowledge.subprocess, "run", lambda command, **kwargs: calls.append((command, kwargs)) or subprocess.CompletedProcess(command, code, json.dumps(payload)))
     result = knowledge.prepare_knowledge(tmp_path)
     command, kwargs = calls[0]
-    assert command == [sys.executable, "-m", "vaws_knowledge", "prepare", "--project", str(tmp_path)]
+    assert command == [sys.executable, "-c", knowledge.PREPARE_CODE]
     assert kwargs["env"]["KNOWLEDGE_OWNER"] == "native"
     assert kwargs["stdout"] == subprocess.PIPE and kwargs["stderr"] is sys.stderr
     assert result["ready"] is ready

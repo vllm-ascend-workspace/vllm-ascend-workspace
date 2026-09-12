@@ -105,8 +105,9 @@ class ClientConfigurationTests(unittest.TestCase):
                         self.assertNotIn("VAWS_ENV_RECEIPT", entry["env"])
                         self.assertNotIn("VAWS_ENV_RECEIPT", task["env"])
                     else:
-                        self.assertEqual(entry["args"], self.SERVER_ARGS)
-                        self.assertEqual(task["args"], self.TASK_ARGS)
+                        gateway = str(ROOT / ".agents/scripts/vaws_native_mcp.py")
+                        self.assertEqual(entry["args"], [gateway, "remote"])
+                        self.assertEqual(task["args"], [gateway, "task"])
                         self.assertEqual(entry["env"]["VAWS_ENV_RECEIPT"], receipt["receipt"])
                     for key in self.REQUIRED_ENV:
                         self.assertIn(key, entry["env"])
@@ -141,8 +142,10 @@ class ClientConfigurationTests(unittest.TestCase):
             for key in self.REQUIRED_ENV:
                 self.assertIn(key, mcp["env"])
             codex = tomllib.loads(setup.configuration("codex", project)[project / ".codex/config.toml"])
-            self.assertEqual(codex["mcp_servers"]["remote_dev"]["args"], self.SERVER_ARGS)
-            self.assertEqual(codex["mcp_servers"]["vaws_task"]["args"], self.TASK_ARGS)
+            self.assertEqual(codex["mcp_servers"]["remote_dev"]["args"],
+                             [str(ROOT / ".agents/scripts/vaws_native_mcp.py"), "remote"])
+            self.assertEqual(codex["mcp_servers"]["vaws_task"]["args"],
+                             [str(ROOT / ".agents/scripts/vaws_native_mcp.py"), "task"])
             self.assertNotIn("REMOTE_DEV_RESOLVERS", codex["mcp_servers"]["remote_dev"]["env"])
         self.assertFalse(str(setup.BACKUP_DIR).startswith(str(ROOT / ".remote-dev")))
         self.assertTrue(str(setup.BACKUP_DIR).startswith(str(ROOT / ".vaws-local")))

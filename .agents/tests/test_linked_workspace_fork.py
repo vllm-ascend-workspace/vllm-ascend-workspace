@@ -87,7 +87,9 @@ def test_kimi_fork_keeps_current_head_and_saved_pin_without_upstream_check(tmp_p
     assert not f.calls["prepare"]
     assert f.calls["configure"][-1]["receipt"] == f.receipt_old
     assert f.calls["configure"][-1]["head"] == f.old
-    assert json.loads((target / ".vaws-local/environment-selection" / f"{sys.platform}.json").read_text()) == f.receipt_old
+    selection = json.loads((target / ".vaws-local/environment-selection" / f"{sys.platform}.json").read_text())
+    assert selection.pop("knowledge") == {"status": "ready", "ready": True}
+    assert selection == f.receipt_old
     if dirty:
         assert (target / "README").read_text() == "working draft\n"
         assert (target / "new.txt").read_text() == "untracked draft\n"

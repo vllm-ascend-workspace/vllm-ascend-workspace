@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 from pathlib import Path
 import sys
@@ -76,6 +77,61 @@ class ForkValidationTests(unittest.TestCase):
             with self.assertRaises(forks.GitHubAPIError) as raised:
                 forks.GitHubClient().api("repos/alice/test")
         self.assertEqual(raised.exception.status, 401)
+        self.assertEqual(raised.exception.evidence["returncode"], 1)
+
+    def test_api_machine_output_overrides_terminal_color_without_changing_parent(self):
+        original = {"CLICOLOR_FORCE": "1", "FORCE_COLOR": "1", "GH_FORCE_TTY": "80", "GITHUB_TOKEN": "private-fixture"}
+        result = mock.Mock(returncode=0, stdout='{"ok": true}', stderr="")
+        with mock.patch.dict(os.environ, original), mock.patch.object(forks.subprocess, "run", return_value=result) as run:
+            self.assertEqual(forks.GitHubClient().api("user"), {"ok": True})
+            env = run.call_args.kwargs["env"]
+            self.assertEqual((env["CLICOLOR_FORCE"], env["FORCE_COLOR"], env["NO_COLOR"]), ("0", "0", "1"))
+            self.assertNotIn("GH_FORCE_TTY", env)
+            self.assertEqual(env["GITHUB_TOKEN"], original["GITHUB_TOKEN"])
+            self.assertEqual(os.environ["CLICOLOR_FORCE"], "1")
+            self.assertEqual(os.environ["GH_FORCE_TTY"], "80")
+            run.assert_called_once()
+
+    def test_invalid_json_keeps_redacted_raw_api_evidence_in_update_log(self):
+        from vaws_workspace_update import WorkspaceUpdater
+
+        token = "gh" + "p_" + "fixturecredential"
+        header = "> Authorization: " + "Bearer " + "private-fixture"
+        url = "https://" + "user:secret" + "@example.invalid/"
+        stderr = "\n".join((header, token, url, ""))
+        proc = mock.Mock(returncode=0, stdout="\x1b[32m{not-json}\x1b[0m", stderr=stderr)
+        with mock.patch.object(forks.subprocess, "run", return_value=proc) as run:
+            with self.assertRaises(forks.GitHubAPIError) as raised:
+                forks.GitHubClient().api("repos/alice/test")
+        facts = raised.exception.evidence
+        self.assertEqual(facts["endpoint"], "repos/alice/test")
+        self.assertEqual(facts["method"], "GET")
+        self.assertEqual(facts["command"], ["gh", "api", "--hostname", "github.com", "repos/alice/test", "--method", "GET"])
+        self.assertEqual(facts["stdout"], proc.stdout)
+        self.assertEqual(facts["returncode"], 0)
+        self.assertNotIn(token, facts["stderr"])
+        self.assertNotIn("private-fixture", facts["stderr"])
+        self.assertNotIn("user:secret", facts["stderr"])
+        run.assert_called_once()
+        with tempfile.TemporaryDirectory() as directory:
+            result = WorkspaceUpdater(Path(directory)).failure(raised.exception)
+            self.assertEqual(json.loads(Path(result["log"]).read_text()), facts)
+
+    def test_api_timeout_keeps_captured_bytes_without_retry(self):
+        timeout = forks.subprocess.TimeoutExpired(["gh"], 60, output=b"partial response", stderr=b"timeout detail")
+        with mock.patch.object(forks.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(forks.GitHubAPIError) as raised:
+                forks.GitHubClient().api("user")
+        self.assertEqual(raised.exception.evidence["stdout"], "partial response")
+        self.assertEqual(raised.exception.evidence["stderr"], "timeout detail")
+        self.assertIsNone(raised.exception.evidence["returncode"])
+        run.assert_called_once()
+
+    def test_api_non_object_keeps_original_response(self):
+        with mock.patch.object(forks.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="[]", stderr="")):
+            with self.assertRaises(forks.GitHubAPIError) as raised:
+                forks.GitHubClient().api("user")
+        self.assertEqual(raised.exception.evidence["stdout"], "[]")
 
 
 class SetupTests(unittest.TestCase):

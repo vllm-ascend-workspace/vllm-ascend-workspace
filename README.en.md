@@ -10,7 +10,7 @@ Open this checkout in an Agent client and ask:
 
 > Initialize this workspace for vLLM Ascend development.
 
-Initialization reuses configuration, installs locked packages and runs `vaws_client_setup.py --client all --apply` to detect and configure installed Agent clients together. Invoking a Skill is optional. The result identifies supported native defaults and any remaining native choices, which can be completed once through client tools or computer use. Configured clients create worktrees and run setup before Agent work; ordinary sessions need no VAWS launcher command. Versions and real acceptance boundaries are in [native client acceptance](docs/native-client-validation-2026-09-12.md) and [native workspace isolation](docs/native-workspace-isolation.md). Installation and platform behavior are in [dependency-plane.md](docs/dependency-plane.md) and [platform-contract.md](docs/platform-contract.md).
+Initialization reuses configuration, installs locked packages and runs `vaws_client_setup.py --client all --apply` to configure installed Codex, Cursor, Claude, Grok and Kimi clients together. It requires neither invoking a Skill nor installing a personal client build. Short project guidance prepares one independent editing directory, upstream revision and component environment per new task; existing native worktree setup results are reused directly. Users keep working in their usual client, and resume retains the original directory and environment. See [workspace isolation](docs/native-workspace-isolation.md) for the contract and [this round's acceptance record](docs/unified-session-validation-2026-09-13.md) for verified scope. Installation and platform behavior are in [dependency-plane.md](docs/dependency-plane.md) and [platform-contract.md](docs/platform-contract.md).
 
 For daily work, describe the outcome and the inputs that matter:
 
@@ -63,6 +63,8 @@ Skill selection follows the task. Detailed inputs and procedures live beside the
 ## Repository and local state
 
 The canonical repository is `vllm-ascend-workspace/vllm-ascend-workspace`. Git submodules `vllm/` and `vllm-ascend/` remain on their community upstreams. Personal forks are development remotes; setup preserves established remote choices.
+
+A new task checks canonical main once and selects that revision's locked component combination; no Release is required. Startup binds the returned editing directory as task sources, and the MCP gateway routes calls to the task's fixed environment. The client's displayed cwd may stay at the original project. Work and resume do not switch versions. Related worktrees share knowledge configuration, content and reusable model/index state. See [forks and updates](docs/forks-and-updates.md).
 
 `.agents/skills/` contains business skills, `.agents/lib/` contains shared consumer code, and `.agents/scripts/` contains client wiring and maintenance tools. Client projections route to canonical skills. Runtime state and private configuration stay under untracked `.vaws-local/`; credentials are never committed. Public knowledge uses only package-prepared redacted copies.
 

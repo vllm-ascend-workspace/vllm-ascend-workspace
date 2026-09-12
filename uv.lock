@@ -4240,7 +4240,7 @@ wheels = [
 [[package]]
 name = "vaws-coordinator"
 version = "0.4.1.dev1"
-source = { git = "https://github.com/maoxx241/vaws-coordinator?rev=03b30474d38c61f9ea5b7b7a2415aaad40805de5#03b30474d38c61f9ea5b7b7a2415aaad40805de5" }
+source = { git = "https://github.com/vllm-ascend-workspace/vaws-coordinator?rev=831a0f568024e982b88bfba0d72f3debf542f723#831a0f568024e982b88bfba0d72f3debf542f723" }
 dependencies = [
     { name = "setuptools-scm" },
     { name = "vaws-remote-dev" },
@@ -4249,7 +4249,7 @@ dependencies = [
 [[package]]
 name = "vaws-knowledge"
 version = "0.5.0"
-source = { git = "https://github.com/vllm-ascend-workspace/vaws-knowledge?rev=c95293836a3b595c13a80189197d44a2980c9fbd#c95293836a3b595c13a80189197d44a2980c9fbd" }
+source = { git = "https://github.com/vllm-ascend-workspace/vaws-knowledge?rev=f928dc37c6f34688d0cfa9a9b4f6d3e882958959#f928dc37c6f34688d0cfa9a9b4f6d3e882958959" }
 dependencies = [
     { name = "fastembed" },
     { name = "openviking" },
@@ -4267,6 +4267,7 @@ name = "vaws-workspace"
 version = "0"
 source = { virtual = "." }
 dependencies = [
+    { name = "mcp" },
     { name = "pillow" },
     { name = "vaws-coordinator" },
     { name = "vaws-knowledge" },
@@ -4276,23 +4277,22 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "jsonschema" },
-    { name = "mcp" },
     { name = "pytest" },
     { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "mcp", specifier = "==1.30.0" },
     { name = "pillow", specifier = ">=11" },
-    { name = "vaws-coordinator", git = "https://github.com/maoxx241/vaws-coordinator?rev=03b30474d38c61f9ea5b7b7a2415aaad40805de5" },
-    { name = "vaws-knowledge", git = "https://github.com/vllm-ascend-workspace/vaws-knowledge?rev=c95293836a3b595c13a80189197d44a2980c9fbd" },
+    { name = "vaws-coordinator", git = "https://github.com/vllm-ascend-workspace/vaws-coordinator?rev=831a0f568024e982b88bfba0d72f3debf542f723" },
+    { name = "vaws-knowledge", git = "https://github.com/vllm-ascend-workspace/vaws-knowledge?rev=f928dc37c6f34688d0cfa9a9b4f6d3e882958959" },
     { name = "vaws-remote-dev", git = "https://github.com/vllm-ascend-workspace/remote-dev?rev=2de5cc32c5f3dd517e698cadfb1f9ed23589b1aa" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "jsonschema" },
-    { name = "mcp", specifier = "==1.30.0" },
     { name = "pytest" },
     { name = "pyyaml" },
 ]

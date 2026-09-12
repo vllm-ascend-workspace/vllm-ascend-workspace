@@ -25,7 +25,12 @@ def in_project(payload: dict, *, client: str, project: Path) -> bool:
             from vaws_local_owner import managed_path
             value = managed_path(value, windows=True)
         path = Path(value).expanduser()
-        return path.is_absolute() and path.resolve().is_relative_to(project.resolve())
+        if not path.is_absolute():
+            return False
+        if path.resolve().is_relative_to(project.resolve()):
+            return True
+        from vaws_local_state import shared_workspace_root
+        return shared_workspace_root(path) == shared_workspace_root(project)
 
     if "cwd" in payload:
         return contains(payload["cwd"])
@@ -55,6 +60,7 @@ def main() -> int:
     except Exception:
         print("{}")
         return 0
+    scoped = False
     try:
         from vaws_knowledge.summary_hook import capture_summary
         from vaws_knowledge_service import service_config
@@ -63,9 +69,27 @@ def main() -> int:
         if len(raw) <= 1_048_576:
             payload = json.loads(raw)
             if isinstance(payload, dict) and in_project(payload, client=args.client, project=args.project):
-                capture_summary(payload, config=service_config(ROOT), client=args.client)
-    except Exception:
-        pass
+                scoped = True
+                native = {}
+                if args.client == "kimi":
+                    from vaws_kimi_summary import summary_result
+                    payload, native = summary_result(payload)
+                elif args.client == "cursor":
+                    from vaws_cursor_summary import summary_result
+                    payload, native = summary_result(payload)
+                result = capture_summary(payload, config=service_config(args.project), client=args.client)
+                facts = {"event": "knowledge_summary", "client": args.client,
+                         "status": result.get("status", "unknown") if isinstance(result, dict) else "unknown"}
+                if native:
+                    facts["native"] = native
+                from vaws_workspace_update import redact
+                print(redact(json.dumps(facts, ensure_ascii=False)), file=sys.stderr)
+    except Exception as exc:
+        if scoped:
+            from vaws_workspace_update import redact
+            print(json.dumps({"event": "knowledge_summary", "client": args.client, "status": "failed",
+                              "error_type": type(exc).__name__, "error": redact(str(exc))[:300]},
+                             ensure_ascii=False), file=sys.stderr)
     print("{}")
     return 0
 

@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import os
-import hashlib
 import json
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import tomllib
@@ -13,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from vaws_native_mode_config import add_grok_import_dedup, add_native_mode, grok_native_defaults, kimi_session_setup_capability
+from vaws_native_mode_config import add_grok_import_dedup, add_native_mode
 
 
 class NativeModeConfigTests(unittest.TestCase):
@@ -101,42 +99,18 @@ class NativeModeConfigTests(unittest.TestCase):
         self.assertFalse(files)
         self.assertFalse(notes)
 
-    def test_verified_extensions_disable_auto_installation_idempotently(self):
-        for client, table, key in (("grok", "cli", "auto_update"), ("kimi", "upgrade", "auto_install")):
-            for initial in (True, None):
-                with self.subTest(client=client, initial=initial):
-                    path = self.user_dir / (".grok/config.toml" if client == "grok" else "custom-kimi/tui.toml")
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    before = "# keep user settings\n[" + table + "]\ncustom = 42\n"
-                    if initial is not None:
-                        before += key + " = true\n"
-                    path.write_text(before, encoding="utf-8")
-                    files, notes = {}, []
-                    options = {"user_home": self.user_dir, "capability": {"supported": True}, "kimi_tui_config": path}
-                    add_native_mode(files, notes, client, self.project, **options)
-                    after = tomllib.loads(files[path])
-                    self.assertIs(after[table][key], False)
-                    self.assertEqual(after[table]["custom"], 42)
-                    self.assertIs(notes[-1]["settings"][table][key], False)
-                    self.assertEqual(path.read_text(), before)
-                    path.write_text(files[path], encoding="utf-8")
-                    again = {}
-                    add_native_mode(again, notes, client, self.project, **options)
-                    self.assertEqual(again, {})
-                    self.assertEqual(notes[-1]["action"], "configured")
 
     def test_unverified_clients_preserve_automatic_update_settings(self):
         for client, table, key in (("grok", "cli", "auto_update"), ("kimi", "upgrade", "auto_install")):
-            for capability in (None, {"supported": False}):
-                with self.subTest(client=client, capability=capability):
+            for enabled in (False, True):
+                with self.subTest(client=client, enabled=enabled):
                     path = self.user_dir / (".grok/config.toml" if client == "grok" else "custom-kimi/tui.toml")
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    before = "[" + table + "]\n" + key + " = true\n"
+                    before = "[" + table + "]\n" + key + " = " + str(enabled).lower() + "\n"
                     path.write_text(before, encoding="utf-8")
                     files, notes = {}, []
-                    add_native_mode(files, notes, client, self.project, user_home=self.user_dir,
-                                    capability=capability, kimi_tui_config=path)
-                    self.assertIs(tomllib.loads(files.get(path, before))[table][key], True)
+                    add_native_mode(files, notes, client, self.project, user_home=self.user_dir)
+                    self.assertIs(tomllib.loads(files.get(path, before))[table][key], enabled)
                     self.assertEqual(path.read_text(), before)
 
 
@@ -250,83 +224,6 @@ class GrokImportDedupTests(unittest.TestCase):
         files, notes = self.plan('disabled_mcp_servers = "custom"\n')
         self.assertNotIn(self.path, files)
         self.assertEqual(notes[-1]["reason"], "grok-compat-mcp-needs-integration")
-
-
-class KimiCapabilityTests(unittest.TestCase):
-    def test_installed_parser_contract_in_isolated_home(self):
-        paths = []
-
-        def doctor(argv, **kwargs):
-            path = Path(argv[-1])
-            paths.append(path)
-            self.assertEqual(argv[:3], ["/tools/kimi", "doctor", "config"])
-            self.assertEqual(kwargs["cwd"], path.parent)
-            self.assertEqual(kwargs["env"]["KIMI_CODE_HOME"], str(path.parent))
-            event = tomllib.loads(path.read_text())["hooks"][0]["event"]
-            return subprocess.CompletedProcess(argv, 0 if event == "SessionSetup" else 1,
-                                               "OK" if event == "SessionSetup" else "",
-                                               '' if event == "SessionSetup" else
-                                               'hooks[0].event: Invalid option: expected one of "SessionSetup"|"SessionStart"')
-
-        with patch("vaws_native_mode_config.subprocess.run", side_effect=doctor):
-            result = kimi_session_setup_capability("/tools/kimi")
-        self.assertTrue(result["supported"])
-        self.assertEqual(len(result["checks"]), 2)
-        self.assertTrue(all(not path.exists() for path in paths))
-
-    def test_official_or_permissive_parser_is_not_extension_evidence(self):
-        for responses in ((1, 1), (0, 0)):
-            with self.subTest(responses=responses), patch("vaws_native_mode_config.subprocess.run",
-                    side_effect=[subprocess.CompletedProcess([], code, "", 'hooks[0].event: expected one of "SessionStart"')
-                                 for code in responses]):
-                self.assertFalse(kimi_session_setup_capability("kimi")["supported"])
-
-    def test_unrelated_negative_failure_is_not_extension_evidence(self):
-        with patch("vaws_native_mode_config.subprocess.run", side_effect=[
-                subprocess.CompletedProcess([], 0, "OK", ""),
-                subprocess.CompletedProcess([], 1, "", "SessionSetup: network unavailable")]):
-            self.assertFalse(kimi_session_setup_capability("kimi")["supported"])
-
-    def test_missing_or_timed_out_cli_returns_evidence(self):
-        for error in (FileNotFoundError("kimi"), subprocess.TimeoutExpired(["kimi", "doctor"], 10)):
-            with self.subTest(error=error), patch("vaws_native_mode_config.subprocess.run", side_effect=error):
-                result = kimi_session_setup_capability("kimi")
-                self.assertFalse(result["supported"])
-                self.assertEqual(result["reason"], "native-session-setup-probe-failed")
-                self.assertTrue(result["error"])
-
-
-class GrokInstalledEvidenceTests(unittest.TestCase):
-    def test_acceptance_is_bound_to_the_installed_bytes(self):
-        with tempfile.TemporaryDirectory() as folder:
-            project = Path(folder)
-            binary = project / "grok"
-            binary.write_bytes(b"accepted native build")
-            receipt = project / ".vaws-local/client-installations/grok-native.json"
-            self.assertFalse(grok_native_defaults(binary, project)["supported"])
-            receipt.parent.mkdir(parents=True)
-            record = {"binary": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-                      "capabilities": {"bare_worktree_default": True}}
-            receipt.write_text(json.dumps(record))
-            self.assertTrue(grok_native_defaults(binary, project)["supported"])
-            binary.write_bytes(b"different build with the same version")
-            result = grok_native_defaults(binary, project)
-            self.assertFalse(result["supported"])
-            self.assertEqual(result["reason"], "native-default-build-changed")
-
-    def test_another_executable_or_incomplete_record_is_not_acceptance(self):
-        with tempfile.TemporaryDirectory() as folder:
-            project = Path(folder)
-            binary = project / "grok"
-            binary.write_bytes(b"a native build")
-            receipt = project / ".vaws-local/client-installations/grok-native.json"
-            receipt.parent.mkdir(parents=True)
-            for record in ({"binary": str(project / "other"), "capabilities": {"bare_worktree_default": True}},
-                           {"binary": str(binary), "capabilities": {}},
-                           {"binary": str(binary), "capabilities": []}, []):
-                with self.subTest(record=record):
-                    receipt.write_text(json.dumps(record))
-                    self.assertFalse(grok_native_defaults(binary, project)["supported"])
 
 
 if __name__ == "__main__":

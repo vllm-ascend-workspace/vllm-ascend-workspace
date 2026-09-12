@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import sys
 import tomllib
+from unittest.mock import patch
 
 import pytest
 
@@ -17,7 +18,8 @@ import vaws_native_mode_config as modes
 
 spec = importlib.util.spec_from_file_location("all_client_setup", ROOT / ".agents/scripts/vaws_client_setup.py")
 setup = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(setup)
+with patch("vaws_venv.ensure_workspace_interpreter"):
+    spec.loader.exec_module(setup)
 
 
 def installations(*names):
@@ -95,96 +97,74 @@ def test_grok_follows_path_while_kimi_follows_its_configured_home(tmp_path, monk
     assert found["kimi"]["executable"] == str(known["kimi"])
 
 
-@pytest.mark.parametrize("supported", [False, True])
-def test_all_preview_selects_native_options_by_installed_capability(local_setup, monkeypatch, capsys, supported):
+def test_all_preview_configures_stock_clients_without_native_patch(local_setup, monkeypatch, capsys):
     project, calls = local_setup
     monkeypatch.setattr(inventory, "installed_clients", lambda: installations("codex", "cursor", "kimi", "grok", "claude"))
-    probes = []
-    monkeypatch.setattr(modes, "kimi_session_setup_capability",
-                        lambda exe: probes.append(exe) or {"supported": supported, "checks": []})
     assert setup.main(["--client", "all", "--project", str(project)]) == 0
     result = json.loads(capsys.readouterr().out)
     options = dict(calls)
     assert options["codex"]["codex_global_hooks"]
     assert options["cursor"]["cursor_global_mcp"]
-    assert options["kimi"]["kimi_session_setup"] is supported
-    assert probes == ["/tools/kimi"]
-    assert result["clients"]["codex"]["native_worktree"]["default_mode"] == "not_verified"
-    assert result["clients"]["grok"]["native_worktree"]["initial_cli_start"] == "not_verified"
-    assert result["clients"]["claude"]["native_worktree"]["default_mode"] == "unsupported"
+    assert options["kimi"]["kimi_session_setup"] is False
+    for row in result["clients"].values():
+        assert row["workspace_start"]["trigger"] == "new-session-project-guidance"
+        assert row["workspace_start"]["native_patch_required"] is False
+        assert row["native_worktree"]["missing_action"] is None
     assert not list(project.iterdir())
     assert not (project.parent / ".grok/config.toml").exists()
 
 
-def test_all_skips_missing_clients_and_preserves_unsupported_existing_kimi(local_setup, monkeypatch, capsys):
+def test_all_skips_missing_clients_and_does_not_require_kimi_extension(local_setup, monkeypatch, capsys):
     project, calls = local_setup
     monkeypatch.setattr(inventory, "installed_clients", lambda: installations("kimi", "cursor"))
-    monkeypatch.setattr(modes, "kimi_session_setup_capability", lambda exe: {"supported": False})
     config = project.parent / ".kimi-code/config.toml"
     config.parent.mkdir()
-    original = '[[hooks]]\nevent="SessionSetup"\ncommand="custom-setup"\n'
+    original = '[[hooks]]\nevent="SessionStart"\ncommand="custom-setup"\n'
     config.write_text(original)
-    assert setup.main(["--client", "all", "--project", str(project), "--apply"]) == 1
+    assert setup.main(["--client", "all", "--project", str(project), "--apply"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert [name for name, _ in calls] == ["cursor"]
-    assert result["clients"]["kimi"]["state"] == "blocked"
+    assert {name for name, _ in calls} == {"cursor", "kimi"}
+    assert result["clients"]["kimi"]["state"] == "configured"
     assert result["clients"]["codex"]["state"] == "skipped"
     assert result["clients"]["cursor"]["state"] == "configured"
     assert config.read_text() == original
     record = json.loads(Path(result["record"]).read_text())
-    assert record["state"] == "partial"
-    assert record["clients"]["kimi"]["native_worktree"]["status"] == "unavailable"
+    assert record["state"] == "wiring_configured"
+    assert record["clients"]["kimi"]["workspace_start"]["resume"] == "reuse-existing-workspace"
 
 
-@pytest.mark.parametrize("supported", [False, True])
-def test_all_preserves_verified_extensions_before_applying(local_setup, monkeypatch, capsys, supported):
-    project, _ = local_setup
+@pytest.mark.parametrize("extended", [False, True])
+def test_all_preserves_native_update_preferences_and_requires_explicit_extension(local_setup, monkeypatch, capsys, extended):
+    project, calls = local_setup
     monkeypatch.setattr(inventory, "installed_clients", lambda: installations("grok", "kimi"))
     grok = project.parent / ".grok/config.toml"
     kimi_home = project.parent / "native-kimi-home"
     monkeypatch.setenv("KIMI_CODE_HOME", str(kimi_home))
     kimi = kimi_home / "tui.toml"
-    runtime_config = project.parent / "custom-kimi/config.toml"
-    runtime_config.parent.mkdir()
-    runtime_text = 'default_model = "keep-my-model"\n'
-    runtime_config.write_text(runtime_text)
     for path, text in ((grok, "[cli]\nauto_update = true\n"), (kimi, "[upgrade]\nauto_install = true\n")):
         path.parent.mkdir(parents=True)
         path.write_text(text)
-    probes = []
-
-    def grok_capability(executable, directory):
-        assert tomllib.loads(grok.read_text())["cli"]["auto_update"] is True
-        probes.append((executable, directory))
-        return {"supported": supported}
-
-    monkeypatch.setattr(modes, "grok_native_defaults", grok_capability)
-    monkeypatch.setattr(modes, "kimi_session_setup_capability", lambda exe: {"supported": supported})
-    assert setup.main(["--client", "all", "--project", str(project), "--kimi-config", str(runtime_config), "--apply"]) == 0
+    args = ["--client", "all", "--project", str(project), "--apply"]
+    if extended:
+        args.append("--kimi-session-setup")
+    assert setup.main(args) == 0
     result = json.loads(capsys.readouterr().out)
-    assert probes == [("/tools/grok", project)]
-    assert result["clients"]["grok"]["capability"]["supported"] is supported
-    assert tomllib.loads(grok.read_text())["cli"]["auto_update"] is not supported
-    assert tomllib.loads(kimi.read_text())["upgrade"]["auto_install"] is not supported
-    assert runtime_config.read_text() == runtime_text
-    assert not (runtime_config.parent / "tui.toml").exists()
-    assert not (kimi_home / "config.toml").exists()
-    assert not (project.parent / ".kimi-code/config.toml").exists()
+    assert dict(calls)["kimi"]["kimi_session_setup"] is extended
+    assert tomllib.loads(grok.read_text())["cli"]["auto_update"] is True
+    assert tomllib.loads(kimi.read_text())["upgrade"]["auto_install"] is True
+    assert result["clients"]["kimi"]["workspace_start"]["native_patch_required"] is False
 
 
-def test_native_setting_pending_is_reported_without_failing_initialization(local_setup, monkeypatch, capsys):
+def test_native_gui_choice_is_optional_for_project_startup(local_setup, monkeypatch, capsys):
     project, _ = local_setup
     monkeypatch.setattr(inventory, "installed_clients", lambda: installations("codex", "cursor"))
     assert setup.main(["--client", "all", "--project", str(project), "--apply"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "wiring_configured"
-    assert json.loads(Path(result["record"]).read_text())["state"] == "wiring_configured"
     for client in ("codex", "cursor"):
-        pending = result["clients"][client]["native_worktree"]
-        assert pending["default_mode"] == "not_verified"
-        assert "native tool once" in pending["missing_action"]
-        assert "Computer Use only if no public setter" in pending["missing_action"]
-        assert "not a recurring session check" in pending["missing_action"]
+        native = result["clients"][client]["native_worktree"]
+        assert native["default_mode"] == "client_choice"
+        assert native["missing_action"] is None
 
 
 def test_all_keeps_completed_files_backups_and_continues_after_a_write_failure(local_setup, monkeypatch, capsys):
@@ -220,7 +200,6 @@ def test_single_client_entry_does_not_discover_or_set_global_native_preferences(
     project, calls = local_setup
     monkeypatch.setattr(inventory, "installed_clients", lambda: pytest.fail("per-worktree setup scanned clients"))
     monkeypatch.setattr(modes, "add_native_mode", lambda *args, **kwargs: pytest.fail("per-worktree setup changed user preferences"))
-    monkeypatch.setattr(modes, "grok_native_defaults", lambda *args: pytest.fail("per-worktree setup probed a personal binary"))
     assert setup.main(["--client", "codex", "--project", str(project), "--apply"]) == 0
     capsys.readouterr()
     assert not calls[0][1]["codex_global_hooks"]

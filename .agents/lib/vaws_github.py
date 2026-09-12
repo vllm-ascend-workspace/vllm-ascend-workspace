@@ -29,31 +29,54 @@ class ForkPolicyError(RuntimeError):
 
 
 class GitHubAPIError(ForkPolicyError):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, *, evidence: dict | None = None):
         super().__init__(message)
         self.status = status
+        self.evidence = evidence
 
 
 class GitHubClient:
     def api(self, endpoint: str, method: str = "GET", fields: dict | None = None) -> dict:
+        from vaws_workspace_update import redact
+
         command = ["gh", "api", "--hostname", "github.com", endpoint, "--method", method]
         if fields is not None:
             command += ["--input", "-"]
+        # Native terminals can force gh to colorize even captured JSON. Select
+        # machine output for this subprocess without changing the user's shell.
+        environment = os.environ.copy()
+        environment.update(CLICOLOR_FORCE="0", FORCE_COLOR="0", NO_COLOR="1")
+        environment.pop("GH_FORCE_TTY", None)
+
+        def evidence(result=None, **extra):
+            def output(value):
+                text = value.decode("utf-8", "replace") if isinstance(value, bytes) else value or ""
+                text = redact(text)
+                return re.sub(r"(?im)^([ \t]*[<>*]?[ \t]*(?:authorization|proxy-authorization):)[^\r\n]*",
+                              r"\1 [redacted]", text)
+            return {"command": [redact(item) for item in command], "endpoint": redact(endpoint),
+                    "method": method, "returncode": getattr(result, "returncode", None),
+                    "stdout": output(getattr(result, "stdout", None)),
+                    "stderr": output(getattr(result, "stderr", None)), **extra}
+
         try:
             result = subprocess.run(command, input=json.dumps(fields) if fields is not None else None,
-                                    capture_output=True, text=True, encoding="utf-8", timeout=60)
+                                    capture_output=True, text=True, encoding="utf-8", timeout=60,
+                                    env=environment)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise GitHubAPIError(f"GitHub request could not complete: {exc}") from exc
+            raise GitHubAPIError(f"GitHub request could not complete: {redact(str(exc))}",
+                                 evidence=evidence(exc, error_type=type(exc).__name__)) from exc
         if result.returncode:
             status = re.search(r"HTTP (\d{3})", result.stderr)
-            raise GitHubAPIError(result.stderr.strip() or "GitHub request failed",
-                                 int(status[1]) if status else None)
+            facts = evidence(result)
+            raise GitHubAPIError(facts["stderr"].strip() or "GitHub request failed",
+                                 int(status[1]) if status else None, evidence=facts)
         try:
             value = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise GitHubAPIError("GitHub returned invalid JSON") from exc
+            raise GitHubAPIError("GitHub returned invalid JSON", evidence=evidence(result)) from exc
         if not isinstance(value, dict):
-            raise GitHubAPIError("GitHub returned an unexpected response")
+            raise GitHubAPIError("GitHub returned an unexpected response", evidence=evidence(result))
         return value
 
 

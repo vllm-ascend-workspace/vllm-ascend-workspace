@@ -38,12 +38,19 @@ combination from the official default branch. It invokes that revision's sync
 entry in an isolated checkout and prepares its pinned vaws-top wheel.
 Configured Codex/Cursor native worktree setup prepares once after the client
 creates a directory and before the Agent starts. It fixes the chosen environment
-and that directory's MCP/hook wiring. The callback does not create another editing
-copy or run from SessionStart/resume. Existing directories, resumed sessions and
-running services keep their selected environments; there is no periodic updater.
-Component releases do not trigger unrelated per-component upgrades. The optional
-CLI launcher uses the same updater, without becoming an Agent task prerequisite.
-Setup wiring has contract tests; real GUI new-session acceptance remains pending.
+and that directory's MCP/hook wiring. All five official clients also receive the
+same short `AGENTS.md` startup guidance. A prepared independent native worktree
+is reused; otherwise the first repository operation calls
+`uv run --no-project python .agents/scripts/vaws_start.py --client CLIENT`
+with the existing `--context-file PATH` when needed. This bounded entry prepares
+the canonical default branch with its latest locked components, creates an
+independent worktree, binds explicit sources and saves the task selection in
+`.vaws-local/tasks/<task-id>/start.json` under the shared primary worktree.
+It requires no Skill or client fork. Resume and repeated calls reuse that
+selection; running services keep their loaded environments. There is no periodic
+updater or unrelated per-component upgrade. The optional CLI launcher remains
+separate from this native-session entry. Dated native acceptance records do not
+establish acceptance of a subsequently changed startup or provider path.
 
 ## Loader
 
@@ -94,9 +101,10 @@ last. The selected base Python and store paths are resolved to physical paths so
 an interpreter alias change cannot replace a running client's dependencies.
 An ordinary command reads the ready receipt and never installs packages.
 
-After a successful install, `sync` runs the installed knowledge package's
-`prepare --project ROOT` command. This prepares the model and local index before
-normal use. The JSON retains the dependency install result and reports
+After a successful install, `sync` invokes the installed knowledge package's
+preparation APIs in the selected interpreter, using the shared service
+configuration to prepare the model and index. The JSON retains the dependency
+install result and reports
 `knowledge.status` and `knowledge.ready` separately. Pending knowledge does not
 change a successful dependency install's exit code or block ordinary tools.
 
@@ -109,14 +117,27 @@ sync still prepares knowledge, and real provider readiness is checked separately
 Entry scripts select a prepared platform environment. Interpreter flags and `-m`
 module calls survive re-execution; native Windows launches use UTF-8 and retain
 child-process ownership. A missing installation returns the bootstrap command
-as its remedy. Native client setup pins each MCP/hook process to its ready
-receipt, so later syncs do not change its imported dependencies.
+as its remedy. Hooks and the native MCP gateway start in a prepared environment.
+The gateway (`vaws_native_mcp.py` / `vaws_mcp_runtime.py`) resolves calls from an
+existing `context_file` or supported native metadata and reads the task's fixed
+workspace/receipt. It launches task, remote-dev and knowledge package backends
+with that receipt's Python and workspace cwd. A native worktree already prepared
+at startup can supply its saved selection directly. Missing task preparation or
+context produces an explicit error instead of selecting a recent task.
+
+Backends are retained by workspace and receipt. A long-lived gateway can serve
+tasks with different fixed environments; later syncs or a newer catalog selection
+do not replace their imported dependencies. Tool results expose the selected
+environment, workspace, Python and backend stderr path. Official Kimi passes the
+returned `context_file` to all three providers; clients without supported native
+metadata also need their existing context supplied by hooks or tool arguments.
 
 In a checkout shared by Windows and WSL, managed tasks and knowledge use the
 prepared Windows owner. A managed CLI switches owner before reading stdin or
-performing work; local analysis and explicit endpoint I/O stay native. Same-drive
-Kimi project MCP entries use a permanent per-environment junction with a relative
-Windows interpreter path. Run `uv run --no-project python
+performing work; local analysis and explicit endpoint I/O stay native. Existing
+per-environment Windows launch aliases remain immutable. The new gateway does
+not extend the supported mixed-OS worktree or owner boundaries.
+Run `uv run --no-project python
 .agents/scripts/vaws_client_setup.py --client CLIENT --project PATH --apply` to
 generate configuration; managed entries retain custom fields and foreign
 launchers. The [platform contract](platform-contract.md) describes the common
@@ -148,8 +169,18 @@ shared downloads; it does not create a fork or enable public contribution.
 Existing publishing configuration is preserved. `--contribute` explicitly enables
 authorized contribution; `--read-only` disables contribution while keeping shared
 downloads. A repository change alone preserves the existing contribution choice.
-Then refresh selected clients with `vaws_client_setup.py --apply` so MCP receives
-`.vaws-local/knowledge/service.json` and supported final-response hooks.
+Then refresh selected clients with `vaws_client_setup.py --apply` to install the
+MCP wiring and supported final-response hooks.
+
+Clients and linked worktrees use the shared primary worktree's
+`.vaws-local/knowledge/service.json`. Preparation refreshes its owned project
+Markdown snapshot from the selected workspace and retains custom mounts,
+candidate storage, backend settings and contribution choices. Default model and
+index state also live under this shared knowledge directory; they are not copied
+per editing worktree. Gateway routing fixes the package interpreter for each task,
+while the service configuration and reference content are shared. Package owners
+retain index maintenance, locking and model lifecycle; shared paths alone do not
+prove compatibility across concurrently running package versions.
 
 Knowledge MCP starts its internal model/index maintenance while alive, independent
 of public contribution. Shared synchronization is enabled by default and consumes
@@ -195,4 +226,9 @@ without starting OpenViking. `--install-dir <client-skill-directory>` installs
 that same packaged resource for native discovery. Workspace does not keep a
 second canonical copy or require curation for ordinary capture.
 
-Doctor also reads the running coordinator identity without launching a daemon. Its loaded version/commit can differ from the installed package after sync; use `vaws-coordinator daemon --action restart-if-idle` after owned executions and leases finish. Task MCP responses carry their own startup identity; refresh their native-client process separately when stale. Missing loaded identity remains unknown.
+Doctor also reads the running coordinator identity without launching a daemon.
+Its loaded version/commit can differ from the installed package after sync; use
+`vaws-coordinator daemon --action restart-if-idle` after owned executions and
+leases finish. Task MCP responses carry their backend's startup identity. A newer
+installed or catalog version does not hot-upgrade a task bound to an older
+receipt. Missing loaded identity remains unknown.

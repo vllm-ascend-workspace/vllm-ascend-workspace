@@ -6,7 +6,8 @@ policies, authenticate clients, run hooks, or contact a remote machine. It
 never writes a bearer token and must not be applied to the operator's live
 client configuration from tests.
 
-Three logical providers are written when needed:
+Three logical providers use the stable native MCP entry, which dispatches to
+the component environment selected by the native task:
 
 * `vaws-task` -> `python -m vaws_coordinator task-server`, which serves
   `vaws_session` / `vaws_run` / `vaws_execution` / `vaws_finish` and optional
@@ -54,6 +55,7 @@ from vaws_local_owner import managed_path as _managed_path, managed_python as _m
 from vaws_environment import PIN_ENV, native_ready, windows_ready, read_receipt
 from vaws_local_state import agent_sessions_root
 from vaws_native_task_env import user_task_env
+from vaws_claude_config import provider_kind, wrapped_hook_kind
 from vaws_remote_dev import state_dir
 
 CLIENTS = {"claude", "grok", "kimi", "codex", "cursor"}
@@ -63,7 +65,11 @@ TASK_SERVER_NAME = "vaws-task"
 REMOTE_DEV_SERVER_NAME = "remote-dev"
 KNOWLEDGE_SERVER_NAME = "vaws-knowledge"
 HOOK_TIMEOUT_SECONDS = 12
-TASK_TOOL_MATCHER = r"(?:^|:|__)vaws_(session|run|execution|finish|message)$"
+TASK_TOOL_MATCHER = r"(?:^|:|__)vaws_(?:session|run|execution|finish|message)$"
+LEGACY_CONTEXT_MATCHERS = frozenset({TASK_TOOL_MATCHER, r"(?:^|:|__)vaws_(session|run|execution|finish|message)$"})
+COMPANION_TOOL_MATCHER = r"^(?:MCP:)?(?:mcp__)?(?:vaws[-_]knowledge__knowledge_(?:query|explain|capture)|remote[-_]dev__remote_[a-z_]+)$"
+CONTEXT_TOOL_MATCHER = "(?:" + TASK_TOOL_MATCHER + "|" + COMPANION_TOOL_MATCHER + ")"
+CURSOR_CONTEXT_TOOL_MATCHER = "(?:" + CONTEXT_TOOL_MATCHER + r"|^MCP:(?:knowledge_(?:query|explain|capture)|remote_[a-z_]+)$)"
 
 
 def remote_dev_server_args():
@@ -164,14 +170,14 @@ def desired_mcp_servers(*, task_only=False):
     if not task_only:
         servers[REMOTE_DEV_SERVER_NAME] = {
             "command": native_ready(ROOT)["python"],
-            "args": remote_dev_server_args(),
+            "args": [str(ROOT / ".agents/scripts/vaws_native_mcp.py"), "remote"],
             "type": "stdio",
             "timeout": 600000,
             "env": remote_dev_env(),
         }
     servers[TASK_SERVER_NAME] = {
         "command": managed_python(),
-        "args": task_server_args(),
+        "args": [managed_path(ROOT / ".agents/scripts/vaws_native_mcp.py"), "task"],
         "type": "stdio",
         "timeout": 600000,
         "env": task_server_env(),
@@ -179,7 +185,7 @@ def desired_mcp_servers(*, task_only=False):
     if not task_only:
         servers[KNOWLEDGE_SERVER_NAME] = {
             "command": knowledge_owner_python(ROOT),
-            "args": knowledge_server_args(),
+            "args": [knowledge_owner_path(ROOT, ROOT / ".agents/scripts/vaws_native_mcp.py"), "knowledge"],
             "type": "stdio",
             "timeout": 600000,
             "env": knowledge_owner_env(ROOT),
@@ -285,14 +291,14 @@ def hook_groups(client, project, env=None):
             for event in EVENTS if event not in {"PreToolUse", "UserPromptSubmit"}
         }
         groups["preToolUse"] = [{"command": command, "timeout": HOOK_TIMEOUT_SECONDS,
-                                 "matcher": TASK_TOOL_MATCHER}]
+                                 "matcher": CURSOR_CONTEXT_TOOL_MATCHER}]
         return groups
     groups = {
         event: [{"hooks": [{"type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECONDS}]}]
         for event in EVENTS if not (client == "kimi" and event == "PreToolUse")
     }
     if "PreToolUse" in groups:
-        groups["PreToolUse"][0]["matcher"] = TASK_TOOL_MATCHER
+        groups["PreToolUse"][0]["matcher"] = CONTEXT_TOOL_MATCHER
     return groups
 
 
@@ -379,6 +385,11 @@ def owned_hook_command(command, client, project, expected=None):
     except ValueError:
         return False
     script = executed_hook_script(argv)
+    if client == "claude" and len(argv) >= 2 and script == argv[1] and _is_python_interpreter(argv[0]):
+        kind = wrapped_hook_kind(argv, ROOT)
+        if kind is not None:
+            direct = ROOT / ".agents/hooks" / ("vaws_session.py" if kind == "session" else "knowledge_summary.py")
+            return owned_hook_script(direct, expected=expected)
     if not script or not owned_hook_script(script, expected=expected):
         return False
     parsed_client = None
@@ -448,13 +459,20 @@ def merge_hook_event(existing, desired, client, project):
             if entries:
                 updated_group = dict(group)
                 updated_group["hooks"] = entries
-                # Older generated groups ran for every tool. Narrow only an
-                # entirely owned group; user matchers and mixed groups retain
-                # their existing scope.
-                if ("matcher" not in group and desired[0].get("matcher")
-                        and all(owned_hook_command(entry.get("command", ""), client, project, expected=expected)
-                                for entry in entries)):
-                    updated_group["matcher"] = desired[0]["matcher"]
+                matcher = desired[0].get("matcher")
+                owned = [entry for entry in entries if owned_hook_command(
+                    entry.get("command", ""), client, project, expected=expected)]
+                if matcher and owned and group.get("matcher") in LEGACY_CONTEXT_MATCHERS:
+                    custom = [entry for entry in entries if entry not in owned]
+                    if custom:
+                        # Expanding a VAWS matcher must not expand a sibling's
+                        # user-selected scope. Keep that group and move ours.
+                        result.append({**updated_group, "hooks": custom})
+                        result.append({"matcher": matcher, "hooks": owned})
+                        continue
+                    updated_group["matcher"] = matcher
+                elif "matcher" not in group and matcher and len(owned) == len(entries):
+                    updated_group["matcher"] = matcher
                 result.append(updated_group)
             continue
         command = group.get("command", "")
@@ -464,7 +482,8 @@ def merge_hook_event(existing, desired, client, project):
             updated = dict(group)
             updated["command"] = desired_command
             if desired[0].get("matcher"):
-                updated.setdefault("matcher", desired[0]["matcher"])
+                if "matcher" not in updated or updated["matcher"] in LEGACY_CONTEXT_MATCHERS:
+                    updated["matcher"] = desired[0]["matcher"]
             result.append(updated)
             replaced = True
         else:
@@ -492,7 +511,7 @@ def owned_workspace_interpreter(command, checkout):
 
 
 def owned_environment_server(existing, checkout):
-    if existing.get("args") not in (task_server_args(), knowledge_server_args(), remote_dev_server_args()):
+    if provider_kind(existing.get("args"), ROOT) is None:
         return False
     if owned_workspace_interpreter(existing.get("command", ""), checkout):
         return True
@@ -525,15 +544,16 @@ def legacy_generated_toml_server(text, name, key, existing, checkout):
 
 
 def managed_environment_change(existing, desired, *, checkout):
-    return (existing.get("args") == desired.get("args") and owned_environment_server(existing, checkout)
-            and (existing.get("command") != desired.get("command")
+    return (provider_kind(existing.get("args"), ROOT) == provider_kind(desired.get("args"), ROOT)
+            and owned_environment_server(existing, checkout)
+            and (existing.get("args") != desired.get("args") or existing.get("command") != desired.get("command")
                  or existing.get("env", {}).get(PIN_ENV) != desired.get("env", {}).get(PIN_ENV)))
 
 
 def knowledge_owner_defaults(existing, desired, checkout, *, legacy=False):
     """Normalize generated knowledge paths without replacing custom locations."""
     environment = dict(existing.get("env") or {})
-    if (existing.get("args") == desired.get("args") == knowledge_server_args()
+    if (provider_kind(existing.get("args"), ROOT) == provider_kind(desired.get("args"), ROOT) == "knowledge"
             and (legacy or owned_environment_server(existing, checkout))):
         if desired.get("env", {}).get("VAWS_KNOWLEDGE_CONFIG"):
             defaults = {"VAWS_KNOWLEDGE_PROJECT_ROOTS": ".agents/knowledge",
@@ -570,10 +590,28 @@ def update_toml_server_command(text, key, command):
     return text
 
 
+def update_toml_server_args(text, key, arguments):
+    headers = {f"[mcp_servers.{key}]", f"[mcp_servers.{json.dumps(key)}]"}
+    lines = text.splitlines(keepends=True)
+    inside = False
+    for index, line in enumerate(lines):
+        if line.strip().startswith("["):
+            inside = line.strip() in headers
+        elif inside and re.match(r"^args\s*=", line.strip()):
+            # Generated launch arrays occupy one line; custom multiline arrays
+            # remain unchanged and the complete TOML parse below rejects drift.
+            lines[index] = "args = " + json.dumps(arguments) + "\n"
+            candidate = "".join(lines)
+            tomllib.loads(candidate)
+            return candidate
+    return text
+
+
 def merge_server_entry(existing, desired, *, checkout=None):
     """Update generated environment entries; preserve user-managed entries."""
     checkout = ROOT if checkout is None else checkout
-    if existing.get("args") != desired.get("args") or not owned_environment_server(existing, checkout):
+    if (provider_kind(existing.get("args"), ROOT) != provider_kind(desired.get("args"), ROOT)
+            or not owned_environment_server(existing, checkout)):
         return dict(existing), "preserved"
     existing = {**existing, "env": knowledge_owner_defaults(existing, desired, checkout)} if "env" in existing else existing
     if managed_environment_change(existing, desired, checkout=checkout):
@@ -585,7 +623,7 @@ def merge_server_entry(existing, desired, *, checkout=None):
                 environment[key] = value
         if "WSLENV" in desired.get("env", {}):
             environment = windows_interop_env(environment)
-        return {**desired, **existing, "command": desired["command"], "env": environment}, "updated-managed"
+        return {**desired, **existing, "command": desired["command"], "args": desired["args"], "env": environment}, "updated-managed"
     merged = {**desired, **existing}
     desired_env = dict(desired.get("env") or {})
     existing_env = dict(existing.get("env") or {})
@@ -730,9 +768,8 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
     project = project.expanduser().resolve(strict=True)
     env = launch_env(client, project, kimi_config=kimi_config)
     groups = hook_groups(client, project, env)
-    # Kimi Code's Stop event supplies no final text; it keeps MCP access and
-    # session hooks without installing a summary hook that cannot capture.
-    if not task_only and client in {"codex", "claude", "cursor", "grok"}:
+    # Kimi's adapter reads only the known session's final completed wire step.
+    if not task_only:
         summary_command = local_hook_command([
             knowledge_owner_python(ROOT), knowledge_owner_path(ROOT, ROOT / ".agents/hooks/knowledge_summary.py"),
             "--client", client, "--project", knowledge_owner_path(ROOT, project),
@@ -740,12 +777,14 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
         ])
         if client == "cursor":
             groups["afterAgentResponse"] = [{"command": summary_command}]
+            groups.setdefault("sessionEnd", []).append({"command": summary_command})
         else:
             groups["Stop"] = [{"hooks": [{"type": "command", "command": summary_command, "timeout": 5}]}]
     servers = desired_mcp_servers(task_only=task_only)
     if client == "kimi":
         servers = shared_kimi_servers(servers, project)
         servers = {name: {**{key: value for key, value in entry.items() if key not in {"type", "timeout"}},
+                          "env": {**entry.get("env", {}), "VAWS_MCP_CLIENT": "kimi"},
                           "toolTimeoutMs": 600000}
                    for name, entry in servers.items()}
     files = {}
@@ -780,11 +819,12 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
                 for alias in matching:
                     before = text
                     legacy = legacy_generated_toml_server(text, name, alias, existing[alias], project)
-                    if (existing[alias].get("args") == entry.get("args")
+                    if (provider_kind(existing[alias].get("args"), ROOT) == provider_kind(entry.get("args"), ROOT)
                             and (legacy or owned_environment_server(existing[alias], project))
                             and editable_toml_server_env(text, alias, existing[alias])):
                         try:
                             candidate = update_toml_server_command(text, alias, entry["command"])
+                            candidate = update_toml_server_args(candidate, alias, entry["args"])
                             candidate = fill_toml_server_env(candidate, alias, existing[alias], entry,
                                                              checkout=project, legacy=legacy)
                             rendered = tomllib.loads(candidate)["mcp_servers"][alias]
@@ -792,7 +832,7 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
                             candidate = before
                             rendered = existing[alias]
                         desired_pin = entry.get("env", {}).get(PIN_ENV)
-                        if (rendered.get("command") == entry["command"]
+                        if (rendered.get("command") == entry["command"] and rendered.get("args") == entry["args"]
                                 and (desired_pin is None or rendered.get("env", {}).get(PIN_ENV) == desired_pin)):
                             text = candidate
                     updated = text != before
@@ -808,27 +848,28 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
         if changed:
             files[path] = text
     if client == "kimi":
-        from vaws_kimi_config import add_kimi_user_mcp, kimi_session_setup_enabled, migrate_kimi_hooks
+        from vaws_kimi_config import add_kimi_user_mcp, remove_owned_kimi_hooks
         path = kimi_config or kimi_home() / "config.toml"
         original = path.read_text(encoding="utf-8") if path.exists() else ""
         project_key = hashlib.sha256(str(project).encode()).hexdigest()[:16]
-        # Official Kimi 0.42 does not understand SessionSetup. Preserve an
-        # explicit extension choice on repair, and never enable it implicitly.
-        extended = kimi_session_setup or kimi_session_setup_enabled(original, project, ROOT, parse_command=hook_argv)
+        # Official events are the default. A previous personal binary must not
+        # make SessionSetup a permanent requirement for later initialization.
+        extended = kimi_session_setup
         command = local_hook_command(["uv", "run", "--no-project", "python",
                                       str(ROOT / ".agents/scripts/vaws_kimi_session_setup.py"),
                                       "--project", str(project)]) if extended else groups["SessionStart"][0]["hooks"][0]["command"]
         events = [*( ["SessionSetup"] if extended else []), *groups]
         body = "\n".join(
-            "[[hooks]]\nevent = " + json.dumps(event) + "\ncommand = " + json.dumps(command)
+            "[[hooks]]\nevent = " + json.dumps(event) + "\ncommand = " + json.dumps(
+                groups[event][0]["hooks"][0]["command"] if event == "Stop" else command)
             + "\ntimeout = " + str(600 if event == "SessionSetup" else HOOK_TIMEOUT_SECONDS) + "\n"
             for event in events
         )
+        original = remove_owned_kimi_hooks(original, project, ROOT, parse_command=hook_argv,
+                                           include_summary=not task_only)
         files[path] = managed_toml_text(original, "session-" + project_key, body)
-        if extended:
-            files[path] = migrate_kimi_hooks(files[path], project, ROOT, parse_command=hook_argv)
-            add_kimi_user_mcp(files, notes, project, ROOT, path.parent,
-                              owned_server=owned_environment_server)
+        add_kimi_user_mcp(files, notes, project, ROOT, path.parent,
+                          owned_server=owned_environment_server)
     from vaws_native_setup_config import add_native_setup
     add_native_setup(files, notes, client, project, ROOT)
     if client == "codex":
@@ -847,6 +888,8 @@ def build_plan(client, project, *, kimi_config=None, task_only=False, kimi_sessi
     if client == "grok":
         from vaws_grok_setup_config import plan_grok_setup
         executable_files = plan_grok_setup(files, notes, project, ROOT)
+    from vaws_start_guidance import add_start_guidance
+    add_start_guidance(files, notes, client, project)
     return {
         "files": files,
         "executable_files": executable_files,
@@ -902,7 +945,7 @@ def apply_plan(plan):
 def setup_installed_clients(args):
     """One-time initialization; each installed client keeps its existing builder."""
     from vaws_client_inventory import installed_clients
-    from vaws_native_mode_config import add_grok_import_dedup, add_native_mode, grok_native_defaults, kimi_session_setup_capability
+    from vaws_native_mode_config import add_grok_import_dedup, add_native_mode
 
     clients = {}
     for client, installation in installed_clients().items():
@@ -914,30 +957,11 @@ def setup_installed_clients(args):
             continue
         phase, current_path = "plan", None
         try:
-            capability = None
-            if client == "kimi":
-                executable = installation.get("executable")
-                capability = (kimi_session_setup_capability(executable) if executable else
-                              {"supported": False, "reason": "kimi_executable_unavailable"})
-                row["capability"] = capability
-                if not capability["supported"]:
-                    path = args.kimi_config or kimi_home() / "config.toml"
-                    if path.is_file() and any(hook.get("event") == "SessionSetup"
-                            for hook in tomllib.loads(path.read_text(encoding="utf-8")).get("hooks", [])
-                            if isinstance(hook, dict)):
-                        row.update(state="blocked", reason="unsupported_existing_session_setup")
-                        row["native_worktree"] = {"status": "unavailable",
-                            "missing_action": "Install a Kimi client supporting SessionSetup; existing configuration was preserved."}
-                        continue
-            elif client == "grok":
-                capability = grok_native_defaults(installation.get("executable"), args.project)
-                row["capability"] = capability
             plan = build_plan(client, args.project, kimi_config=args.kimi_config, task_only=args.task_only,
-                              kimi_session_setup=bool(client == "kimi" and capability and capability["supported"]),
+                              kimi_session_setup=bool(client == "kimi" and args.kimi_session_setup),
                               codex_global_hooks=client == "codex", cursor_global_mcp=client == "cursor")
             row["notes"] = plan["notes"]
-            add_native_mode(plan["files"], plan["notes"], client, args.project,
-                            capability=capability, kimi_tui_config=kimi_home() / "tui.toml")
+            add_native_mode(plan["files"], plan["notes"], client, args.project)
             if client == "grok":
                 add_grok_import_dedup(plan["files"], plan["notes"], args.project, ROOT,
                                       owned_server=owned_environment_server)
@@ -951,32 +975,18 @@ def setup_installed_clients(args):
                 elif not path.exists() or path.read_bytes() != content.encode("utf-8"):
                     row["files"].append({"path": str(path), "sha256": hashlib.sha256(content.encode()).hexdigest()})
             row["state"] = "configured" if args.apply else "preview"
-            native = {"status": "wiring_configured" if args.apply else "wiring_planned", "missing_action": None}
+            row["workspace_start"] = {"status": "configured" if args.apply else "planned",
+                                      "entry": ".agents/scripts/vaws_start.py", "trigger": "new-session-project-guidance",
+                                      "native_patch_required": False, "resume": "reuse-existing-workspace"}
+            native = {"status": "optional_native_wiring", "missing_action": None}
             if client in {"codex", "cursor"}:
-                native["default_mode"] = "not_verified"
-                native["missing_action"] = (
-                    "During initialization, use a supported native tool once to select Worktree mode and the VAWS local environment; "
-                    "use Computer Use only if no public setter exists and UI access is permitted. Skip if already selected; this is not a recurring session check."
-                    if client == "codex" else
-                    "During initialization, use a supported native tool once to select New Worktree as the default; "
-                    "use Computer Use only if no public setter exists and UI access is permitted. Skip if already selected; this is not a recurring session check.")
-                row["notes"].append({"client": client, "reason": "native-default-mode-requires-one-time-setting",
-                                     "detail": native["missing_action"]})
+                native["default_mode"] = "client_choice"
             elif client == "grok":
-                preference = next((note for note in reversed(plan["notes"])
-                                   if note.get("reason") == "native-worktree-preferences"), None)
-                native.update(scope="/new and /fork", initial_cli_start="not_verified")
-                if preference is None:
-                    native.update(status="preferences_preserved", missing_action="Integrate the existing Grok user preference table once; see notes.")
-                elif capability["supported"]:
-                    native.update(scope="new native sessions and /fork", initial_cli_start=(
-                        "native_default_enabled" if args.apply else "native_default_planned"))
-                else:
-                    native["missing_action"] = "Bare startup needs the native default-worktree patch and one startup/resume acceptance of the installed binary; the configured preference alone does not prove this."
+                native.update(scope="native --worktree, /new and /fork preferences", initial_cli_start="project-guidance")
             elif client == "claude":
-                native.update(default_mode="unsupported", missing_action="Claude has no supported ordinary CLI default-worktree setting; WorktreeCreate handles native worktree creation.")
-            elif not capability["supported"]:
-                native.update(status="session_setup_unavailable", missing_action="Install a Kimi client with the native SessionSetup extension, then rerun initialization.")
+                native.update(default_mode="project-guidance")
+            else:
+                native.update(default_mode="explicit_extension" if args.kimi_session_setup else "project-guidance")
             row["native_worktree"] = native
         except Exception as exc:
             row.update(state="failed", error={"phase": phase, "path": current_path,
@@ -992,7 +1002,7 @@ def setup_installed_clients(args):
         path = shared_workspace_root(args.project) / ".vaws-local/client-initialization.json"
         record = {"state": result["state"], "attempted_at": utc_now_iso(), "project": str(args.project.resolve()),
                   "clients": {name: {key: value for key, value in row.items()
-                                     if key in {"state", "reason", "files", "native_worktree", "error"}}
+                                     if key in {"state", "reason", "files", "native_worktree", "workspace_start", "error"}}
                               for name, row in clients.items()}}
         try:
             write_json(path, record)

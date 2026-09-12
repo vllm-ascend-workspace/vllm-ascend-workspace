@@ -6,89 +6,69 @@ description: Initialize this workspace or repair its dependency, fork and native
 # Initialize the workspace
 
 Complete the requested setup using existing configuration. Broad initialization
-usually needs submodules, dependency installation and a selected native client;
-a narrow repair uses only the relevant operation.
+usually needs submodules, dependencies and installed clients; a narrow repair
+uses only the relevant operation. Ordinary new sessions receive project startup
+guidance without invoking this skill.
 
 Use `uv run --no-project python` before local script paths on Windows, macOS,
-Linux and WSL. The bootstrap prepares or reuses an immutable environment without
-shell activation. Existing dependency receipts and probe results can be reused.
+Linux and WSL. Reuse ready dependency environments and conclusive probe results.
 
-## Inspect what is missing
+## Inspect only what is missing
 
 `scripts/repo_init_probe.py --compact` reports platform, GitHub authentication,
-submodules and remotes without creating an identity or setup choices. Add
-`--include-forks` only when personal fork discovery helps the requested topology.
+submodules and remotes without creating identity or setup choices. Add
+`--include-forks` when personal fork discovery helps the requested topology.
 Known state does not require another complete probe.
 
 Preserve extra remotes, dirty sources and user choices. Keep `.gitmodules` on
-community upstream URLs. All development forks belong to personal GitHub User
-accounts, with personal `origin` and official `upstream`. Task identity and remote resources belong to the
-native attachment and coordinator, so workspace setup needs no machine username
-or alias questionnaire.
+community URLs. Task identity and resources belong to native attachments and
+coordinator; do not ask for machine usernames or task aliases.
 
 ## Complete the relevant setup
 
-- Establish GitHub authentication when the requested GitHub operation needs it.
-  Initialize submodules recursively before configuring their remotes; Git in an
-  empty submodule directory can otherwise resolve to its parent repository.
-- For requested CI-pinned alignment, use `resolve_vllm_ci_pin.py` and report the
-  source of the ref. Preserve dirty submodules and existing intentional pins.
-- Configure development forks with the general entry
-  `.agents/scripts/workspace_forks.py --github-user USER --apply`. This command
-  works without the skill or installed runtime packages; omitting `--apply`
-  returns a read-only plan. On first setup ask only for the personal GitHub ID,
-  using the authenticated login as a suggestion. Reuse a saved confirmation on
-  subsequent runs. The command verifies the authenticated account, personal
-  ownership and official fork network before rewiring remotes. It preserves
-  correctly configured fetch/push protocol splits and extra remotes; conflicting
-  or multiple primary URLs require an explicit replacement with a local backup.
-  Existing business branches, commits and dirty files stay in place.
-- For missing package dependencies, run
-  `uv run --no-project python .agents/scripts/vaws_deps.py sync`. Reuse a ready
-  environment. `doctor` is available for unresolved capability or pin questions;
-  it is not an extra step after an already conclusive result.
-- For first initialization, run
-  `.agents/scripts/vaws_client_setup.py --client all --apply` once. It detects
-  installed clients, prepares hooks/providers and supported native defaults,
-  and records completed changes and remaining native actions in the primary
-  worktree's `.vaws-local/client-initialization.json`. Complete those native
-  actions during initialization using available client tools or computer use;
-  do not defer discovery to the first business task or silently call wiring a
-  mode selection. The record is not a recurring task gate. Explicit single-client
-  repair still uses `--client CLIENT --apply`. For Codex/Cursor, the native
-  Worktree mode/environment choice is separate from writing setup files.
-  New worktree setup and session attachment then run through the client without
-  an Agent launcher call. See the [client boundaries](../../../docs/native-workspace-isolation.md).
-  Codex's `--codex-global-hooks` option installs a fixed user hook scoped to
-  this Git worktree family. Review its native hook definitions once during
-  initialization; configuration generation does not grant trust. The same
-  definitions serve later worktrees and read each directory's saved environment.
-  Cursor's `--cursor-global-mcp` option installs the fixed VAWS providers once
-  in the user configuration, avoiding separate project MCP setup for every new
-  directory. Select New Worktree as its default environment. Claude uses WorktreeCreate in native worktree mode. Grok uses
-  its native Git worktree preference and the project Git creation callback. Kimi
-  requires an explicitly installed SessionSetup extension for automatic directories.
-  Configuration files alone do not prove environment selection or enabled MCPs;
-  one small real task can verify the requested setup. Preserve unrelated client
-  configuration and native hook trust.
+- Establish GitHub authentication when the requested operation needs it.
+  Initialize submodules before configuring their remotes: Git in an empty
+  submodule directory can otherwise resolve to its parent repository.
+- For requested CI-pinned vLLM alignment, use `resolve_vllm_ci_pin.py` and report
+  the source of the ref. Preserve dirty submodules and intentional pins.
+- On first setup ask once for the personal GitHub ID; the authenticated login
+  is a suggestion, not consent. Reuse a saved confirmation. Run
+  `.agents/scripts/workspace_forks.py --github-user USER --apply` to create or
+  reuse verified personal forks with personal `origin` and official `upstream`.
+  Omitting `--apply` returns a plan. Conflicting primary URLs require an explicit
+  replacement with a backup; existing branches, commits and dirty files remain.
+- Prepare missing dependencies with `.agents/scripts/vaws_deps.py sync`.
+  `doctor` helps unresolved capability or pin questions; it is not an extra step
+  after an already conclusive result.
+- Run `.agents/scripts/vaws_client_setup.py --client all --apply` once to detect
+  installed Codex, Cursor, Claude, Grok and Kimi clients and configure providers,
+  hooks and short project guidance. It preserves unrelated configuration and
+  records changes under `.vaws-local/client-initialization.json`. A targeted
+  repair uses `--client CLIENT --apply`. Native trust stays with each client.
+  Configuration alone is not live acceptance; use one small real task when
+  verifying the requested integration.
 
-Successful dependency setup also prepares knowledge. Pending model/index work
-leaves ordinary tools usable. Knowledge MCP maintains itself while alive;
-`.agents/scripts/knowledge_setup.py` is for an explicit preparation retry or
-configuration change. Default setup uses local knowledge and shared downloads;
-`--contribute` enables explicitly requested public contribution. Existing
-publishing choices are preserved. Ordinary development requires no knowledge
-maintenance sequence or additional summary.
+The shared guidance makes a new task prepare its workspace once through
+`vaws_start.py`; an independent native worktree whose setup already selected an
+environment is reused directly. The returned directory becomes the editing root,
+with shell cwd and absolute file paths. Native UI Worktree modes are optional
+optimizations, and official Grok/Kimi need no personal binary. Resume keeps the
+original task, directory and environment with no preparation or update. See
+[client boundaries](../../../docs/native-workspace-isolation.md).
 
-Windows and WSL clients of the same Windows-mounted workspace share its Windows
-knowledge process. A missing interpreter leaves knowledge preparation pending;
-an independent Linux workspace uses its native environment.
+New tasks use the mainline workspace's locked component combination. The stable
+MCP gateway selects each task's fixed environment without a manual reconnect.
+Official Kimi uses the hook's `context_file` for startup and all three VAWS MCP
+providers; other clients inject it through their supported hooks.
 
-Report the requested configuration changes, relevant verification and unresolved
-limitations. Reuse existing authorization; ask only for missing information that
-affects the requested result.
+Dependency preparation also prepares knowledge. Linked worktrees share its
+configuration, project snapshot, candidate store and reusable model/index state.
+Pending knowledge work leaves ordinary tools usable. `knowledge_setup.py` is for
+an explicit preparation retry or configuration change; existing custom roots and
+publishing choices are preserved, and new setup disables public contribution.
+Ordinary development needs no maintenance sequence or additional summary.
 
-Read [command recipes](references/command-recipes.md) for individual operations.
-
-The saved `.vaws-local/github.json` is only client configuration. Server identity,
-resource ownership and authorization remain the coordinator's responsibility.
+Report actual changes, relevant verification and unresolved limitations. Reuse
+existing authorization and ask only for missing information affecting the result.
+Read [command recipes](references/command-recipes.md) for individual operations
+and [the platform contract](../../../docs/platform-contract.md) for Windows/WSL owners.

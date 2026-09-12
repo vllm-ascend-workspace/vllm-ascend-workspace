@@ -7,7 +7,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from vaws_claude_config import KINDS, owned_entry, same_repository
+from vaws_claude_config import KINDS, owned_entry, provider_kind, same_repository
 from vaws_environment import PIN_ENV
 from vaws_local_owner import managed_path, managed_receipt, windows_mounted_workspace
 
@@ -15,9 +15,11 @@ DERIVED_ENV = {PIN_ENV, "REMOTE_DEV_STATE_DIR", "VAWS_KNOWLEDGE_CONFIG",
                "VAWS_KNOWLEDGE_PROJECT_ROOTS", "VAWS_KNOWLEDGE_CANDIDATE_ROOT", "VAWS_KNOWLEDGE_STATE"}
 
 
-def _hook_kind(hook, project, root, parse_command):
+def _hook_kind(hook, project, root, parse_command, include_summary=False):
     events = {"SessionSetup", "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop",
               "PreToolUse", "UserPromptSubmit"}
+    if include_summary:
+        events.add("Stop")
     if not isinstance(hook, dict) or set(hook) - {"event", "command", "timeout"} or hook.get("event") not in events:
         return None
     try:
@@ -29,7 +31,10 @@ def _hook_kind(hook, project, root, parse_command):
         if len(argv) < 6:
             return None
         entry = Path(argv[1])
-        if not (entry.name == "vaws_session.py" and entry.parent.name == "hooks"
+        names = {"vaws_session.py"}
+        if include_summary and hook.get("event") == "Stop":
+            names.add("knowledge_summary.py")
+        if not (entry.name in names and entry.parent.name == "hooks"
                 and entry.parent.parent.name == ".agents" and same_repository(entry.parents[2], root)):
             return None
         options = argv[2:]
@@ -50,48 +55,35 @@ def _hook_kind(hook, project, root, parse_command):
     return None
 
 
-def kimi_session_setup_enabled(text: str, project: Path, root: Path, *, parse_command) -> bool:
-    return any(hook.get("event") == "SessionSetup" and _hook_kind(hook, project, root, parse_command) == "adapter"
-               for hook in tomllib.loads(text).get("hooks", []))
+def remove_owned_kimi_hooks(text: str, project: Path, root: Path, *, parse_command,
+                            include_summary=False) -> str:
+    """Remove this family's generated callbacks, retaining custom hooks verbatim.
 
-
-def migrate_kimi_hooks(text: str, project: Path, root: Path, *, parse_command) -> str:
-    """Replace obsolete generated callbacks covered by this family adapter."""
-    current = hashlib.sha256(str(project).encode()).hexdigest()[:16]
-    marker = re.compile(r"^# BEGIN VAWS session-([0-9a-f]{16})\n(.*?)^# END VAWS session-\1(?:\n|$)", re.M | re.S)
-
-    def owned(hook):
-        return _hook_kind(hook, project, root, parse_command) is not None
-
-    def obsolete(match):
-        if match[1] == current:
-            return match[0]
-        try:
-            parsed = tomllib.loads(match[2])
-        except tomllib.TOMLDecodeError:
-            return match[0]
-        hooks = parsed.get("hooks", [])
-        return "" if set(parsed) == {"hooks"} and hooks and all(owned(hook) for hook in hooks) else match[0]
-
-    text = marker.sub(obsolete, text)
+    The replacement uses official events unless initialization explicitly asks
+    for an extension. Old generated markers confer no ownership on user entries
+    that were subsequently added inside them.
+    """
     table = re.compile(r"^\[\[hooks\]\][ \t]*\n.*?(?=^[ \t]*\[|^# BEGIN VAWS|^# END VAWS|\Z)", re.M | re.S)
 
-    def old_unmarked(match):
+    def strip_owned(match):
         try:
             parsed = tomllib.loads(match[0])
         except tomllib.TOMLDecodeError:
             return match[0]
-        hooks = parsed.get("hooks", [])
-        return "" if set(parsed) == {"hooks"} and len(hooks) == 1 and owned(hooks[0]) else match[0]
+        entries = parsed.get("hooks", [])
+        if (set(parsed) == {"hooks"} and len(entries) == 1
+                and _hook_kind(entries[0], project, root, parse_command, include_summary)):
+            return ""
+        return match[0]
 
-    # Native configuration writers can remove generated comments. Only exact
-    # generated hook entries outside remaining managed blocks are eligible.
-    result, end = [], 0
-    for match in marker.finditer(text):
-        result.extend((table.sub(old_unmarked, text[end:match.start()]), match[0]))
-        end = match.end()
-    result.append(table.sub(old_unmarked, text[end:]))
-    return "".join(result)
+    current = hashlib.sha256(str(project).encode()).hexdigest()[:16]
+    marker = re.compile(r"^# BEGIN VAWS session-([0-9a-f]{16})\n(.*?)^# END VAWS session-\1(?:\n|$)", re.M | re.S)
+
+    def unmark_replaced(match):
+        cleaned = table.sub(strip_owned, match[2])
+        return cleaned if cleaned != match[2] or match[1] == current else match[0]
+
+    return table.sub(strip_owned, marker.sub(unmark_replaced, text))
 
 
 def add_kimi_user_mcp(files: dict, notes: list, project: Path, root: Path, home: Path, *, owned_server) -> None:
@@ -105,7 +97,7 @@ def add_kimi_user_mcp(files: dict, notes: list, project: Path, root: Path, home:
     entry = managed_path(root / ".agents/scripts/vaws_native_mcp.py", windows=windows_mounted_workspace(root))
     bootstrap = managed_receipt(root)["python"]
     for name, server in list(local.get("mcpServers", {}).items()):
-        kind = KINDS.get(tuple(server.get("args", [])))
+        kind = provider_kind(server.get("args", []), root)
         if kind is None or not owned_server(server, project):
             continue
         prior = user_servers.get(name)

@@ -8,11 +8,11 @@ command recipe. Superseded designs and duplicate inventories are retained in Git
 
 ## Current contracts
 
-- [forks-and-updates.md](forks-and-updates.md) — Skill-independent first use, personal forks and upstream preparation in native new-worktree setup before the Agent starts.
+- [forks-and-updates.md](forks-and-updates.md) — Skill-independent first use, personal forks and one upstream preparation per new task.
 - [identity-and-agent-coordination.md](identity-and-agent-coordination.md) — shared-root user attribution, opportunistic message delivery and compiled-output reuse; first-version boundaries are explicit.
 
 - [platform-contract.md](platform-contract.md) — common Windows/macOS/Linux entry points, literal process arguments, native owners and immutable environments.
-- [native-workspace-isolation.md](native-workspace-isolation.md) — native worktree setup, per-client capability boundaries, automatic attachments and fixed local environments; CLI copying is optional.
+- [native-workspace-isolation.md](native-workspace-isolation.md) — official five-client startup guidance, editing paths, automatic attachments and exact task component selection; native setup is optional.
 
 - [design-principles.md](design-principles.md) — nine governing principles; total Agent task cost takes priority, tools stay bounded, knowledge is advisory, and valid work is reused.
 - [windows-installation.md](windows-installation.md) — PowerShell setup, same-filesystem uv cache and verified offline transfer.
@@ -31,6 +31,8 @@ command recipe. Superseded designs and duplicate inventories are retained in Git
 - [tracked-path-guard.md](tracked-path-guard.md) — anti-rot guard against dead in-tree paths in tracked docs.
 
 ## Dated design and validation evidence
+
+- [unified-session-validation-2026-09-13.md](unified-session-validation-2026-09-13.md) — unified official-client preparation and MCP routing; acceptance progress and pending native cases are explicit.
 
 - [native-client-validation-2026-09-12.md](native-client-validation-2026-09-12.md) — native worktree preparation, real client tasks and resume behavior, plus supported client extension boundaries.
 

@@ -9,24 +9,40 @@ uv run --no-project python .agents/scripts/vaws_deps.py sync
 uv run --no-project python .agents/scripts/vaws_client_setup.py --client all --apply
 ```
 
-The second command detects installed clients, configures their providers/hooks
-and supported native defaults, and returns each client's remaining native
-initialization actions. Resolve them during this first setup using the client's
-own tools or computer use. Unavailable interfaces remain explicit; a configured
-MCP entry does not prove that new sessions default to a worktree. The primary
-worktree keeps `.vaws-local/client-initialization.json` for inspection. Ordinary
-tasks do not rerun this initialization or read its record as a prerequisite.
+The second command detects installed clients and configures providers, hooks and
+short project guidance. Native Worktree preferences are optional optimizations;
+o personal Grok/Kimi build is required. The primary worktree keeps
+`.vaws-local/client-initialization.json` for inspection. Trust remains native,
+and live acceptance requires an actual client task. Ordinary tasks do not rerun
+initialization or inspect its record as a prerequisite.
 
-## Codex native initialization
+## New native task
+
+Project guidance supplies this entry when native setup has not already prepared
+an independent worktree and selected environment:
+
+```text
+uv run --no-project python .agents/scripts/vaws_start.py --client CLIENT
+```
+
+Use the actual client name: `codex`, `cursor`, `claude`, `grok` or `kimi`.
+Official Kimi adds `--context-file PATH` from its existing hook. The returned
+workspace is the shell cwd and root for absolute file/search/patch paths;
+sources and environment are already bound. Kimi also passes that context to all
+three VAWS MCP providers. Resume uses the earlier directory and environment
+without running preparation. See [client boundaries](../../../../docs/native-workspace-isolation.md).
+
+## Optional Codex native hooks
 
 ```text
 uv run --no-project python .agents/scripts/vaws_client_setup.py --client codex --codex-global-hooks --apply
 ```
 
 This installs stable user hooks scoped to the current Git worktree family and
-migrates its generated project hooks. Review the native hook definitions once,
-then select Worktree mode and the VAWS local environment. Later directory setup
-reuses the installed hooks without this option; it does not grant trust.
+migrates its generated project hooks. Review native hook definitions once;
+setup does not grant trust. If native Worktree mode and the VAWS local environment
+are selected, the client can perform preparation before the first Agent action.
+The shared new-task entry also supports ordinary project sessions.
 
 ## Probe
 
@@ -139,17 +155,17 @@ while keeping shared downloads. `--repository OWNER/REPO` changes the shared
 corpus without enabling contribution. Only contribution setup needs a GitHub
 login and fork; no token belongs in tracked files.
 Refresh the selected clients with `vaws_client_setup.py --apply` afterward.
-The package MCP service maintains the model, index and shared releases while
-alive. Windows and WSL use the Windows knowledge owner for the same mounted
+Related worktrees reuse the shared configuration, project snapshot, candidate
+store and model/index state. Task-specific MCP backends maintain knowledge while
+alive; they do not require one new corpus or model download per task. Windows and WSL use the Windows knowledge owner for the same mounted
 workspace; a missing Windows interpreter is reported as pending. Independent
 Linux workspaces use their own environment. Knowledge PR review and merge remain
 manual. Ordinary development requires no maintenance commands.
 
 ## Optional isolated CLI entry
 
-Prefer the native client's Worktree mode and setup callback for normal new
-sessions. The following launcher is an optional terminal convenience; neither
-users nor Agents need it for configured native session attachment.
+This launcher remains an optional terminal convenience. Ordinary native sessions
+use the project startup guidance and do not require it.
 
 ```text
 uv run --no-project python .agents/scripts/vaws_client.py codex

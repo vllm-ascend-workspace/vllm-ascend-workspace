@@ -11,6 +11,9 @@ does not need the setup shell's environment.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,7 +33,7 @@ if _pin.environment_receipt:
 # Updates belong before creation of a new editing copy, never in task hooks.
 ensure_workspace_interpreter(repo_root=ROOT)
 
-from vaws_coordinator_launch import CoordinatorUnavailable, exec_module  # noqa: E402
+from vaws_coordinator_launch import CoordinatorUnavailable, coordinator_environment, require_package  # noqa: E402
 from vaws_dependency import REMEDY  # noqa: E402
 
 
@@ -53,7 +56,32 @@ def main() -> int:
     if args.project is not None:
         forwarded += ["--project", str(args.project)]
     try:
-        return exec_module("vaws_coordinator.hooks.vaws_session", forwarded)
+        require_package()
+        os.environ.update(coordinator_environment(repo_root=ROOT))
+        from vaws_coordinator.hooks import vaws_session as native_hook
+        from vaws_start_context import hint_event, project_output
+
+        raw = sys.stdin.read()
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            payload = None
+        # Run the package entry itself so its scope, attachment and error
+        # behavior stay authoritative. Only startup hints need projection;
+        # PreToolUse keeps normal stdout and starts no additional interpreter.
+        previous_argv, previous_stdin = sys.argv, sys.stdin
+        output = io.StringIO() if hint_event(payload) else None
+        try:
+            sys.argv = [native_hook.__name__, *forwarded]
+            sys.stdin = io.StringIO(raw)
+            with contextlib.redirect_stdout(output) if output is not None else contextlib.nullcontext():
+                result = native_hook.main()
+        finally:
+            sys.argv, sys.stdin = previous_argv, previous_stdin
+        if output is not None:
+            print(project_output(args.client, payload, output.getvalue(),
+                                 root=args.project or ROOT), end="")
+        return result
     except CoordinatorUnavailable as exc:
         sys.stdin.read()
         print(
