@@ -32,6 +32,8 @@ command recipe. Superseded designs and duplicate inventories are retained in Git
 
 ## Dated design and validation evidence
 
+- [native-kernel-recipe-performance-2026-09-13.md](native-kernel-recipe-performance-2026-09-13.md) — controlled incremental recipe compilation timings, retained fallback and failed attempts, and actual operator validation.
+
 - [six-scenario-performance-2026-09-13.md](six-scenario-performance-2026-09-13.md) — fixed-component managed preparation, cross-container native reuse, incremental compilation and independent Agent timing comparisons.
 
 - [unified-session-validation-2026-09-13.md](unified-session-validation-2026-09-13.md) — unified official-client preparation and MCP routing; acceptance progress and pending native cases are explicit.
