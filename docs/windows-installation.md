@@ -36,6 +36,82 @@ The environment builder resolves the selected Python to its physical versioned
 path. Install that Python before preparing an offline bundle. It accepts only
 options represented in the immutable build contract; unknown options fail.
 
+## Corporate proxies and system certificates
+
+If uv reports `invalid peer certificate: UnknownIssuer` behind a corporate proxy
+and the proxy CA is already trusted by Windows, enable the system trust store for
+the current PowerShell session before downloading Python or syncing dependencies:
+
+```powershell
+$env:UV_NATIVE_TLS = 'true'
+uv python install 3.13
+uv run --no-project --python 3.13 python .agents/scripts/vaws_deps.py sync --locked --python 3.13
+```
+
+The sync entry preserves this setting for its installer. Current uv versions also
+support `UV_SYSTEM_CERTS=true`; `--native-tls` and `--system-certs` can instead be
+passed explicitly to `vaws_deps.py sync` when the bootstrap interpreter is already
+available. Certificate verification stays enabled and the dependency lock is
+unchanged.
+
+If downloads time out under load while individual requests succeed, set
+`$env:UV_CONCURRENT_DOWNLOADS = '4'` and `$env:UV_HTTP_TIMEOUT = '120'` before
+retrying. The sync installer preserves these transport limits too. Resume
+initialization with `vaws_init.py apply` to reuse saved choices and finished stages.
+
+When an internal package mirror is reachable directly but times out through the
+proxy, add that mirror's hostname to the session's `NO_PROXY`, preserving existing
+entries. Keep external GitHub traffic on the configured proxy. Do not put proxy
+credentials in tracked configuration or diagnostic output.
+
+For an approved PyPI mirror, set `VAWS_PYPI_MIRROR` to its HTTPS simple-index URL
+before resuming setup. For example, replace the placeholder below with the actual
+mirror available on the machine:
+
+```powershell
+$env:VAWS_PYPI_MIRROR = 'https://mirror.example/simple'
+uv run --no-project python .agents/scripts/vaws_init.py apply
+```
+
+On a cold install, VAWS compares a bounded sample (at most 256 KiB per source,
+four-second connection/read timeouts) from the locked source and configured mirror.
+It selects the mirror when the measured rate is at least 25% higher, or the default
+source fails. Warm environment reuse and explicit `--offline` runs do not probe.
+The selected source and measurements appear on stderr. A missing artifact,
+incompatible mirror layout, or slower mirror retains the default source.
+
+The mirror must retain PyPI's `packages/` artifact paths. Only the temporary
+installation copy maps registry/artifact URLs; the checked-in lock, exact versions,
+Git revisions, artifact SHA256 values and environment key stay unchanged. uv still
+enforces `--locked` and rejects modified artifacts. This setting covers locked
+PyPI packages; GitHub and knowledge model downloads use their own transports.
+
+## Knowledge startup and the Microsoft C++ runtime
+
+An installed knowledge environment can still fail at `import onnxruntime` with
+Windows status `0xC0000005` when an old system `msvcp140.dll` is loaded. Inspect
+the first native error and the installed Microsoft Visual C++ runtime version
+before reinstalling Python packages. Updating the official Microsoft Visual C++
+Redistributable is the normal system repair.
+
+When a compatible, Microsoft-signed runtime is already installed in a protected
+directory and a system update is unavailable, an explicit workspace selection is
+also supported. Write `.vaws-local/windows-runtime.json` in the shared workspace
+owner with `msvc_directory` set to that absolute directory. Verify its architecture
+matches Python and verify the Microsoft signature before selecting it. Do not use
+a download directory or an untrusted DLL location.
+
+VAWS keeps the selected library loaded and makes its directory available to
+Python extension imports and inherited child processes, including knowledge
+daemons. This changes only the VAWS process tree; it does not replace system DLLs,
+edit immutable environments, or change locked package versions. Resume
+`vaws_init.py apply`, then reopen the native client so its MCP processes use the
+selection. Recheck the path if Windows updates remove that runtime package.
+
+Local knowledge also defaults `LITELLM_LOCAL_MODEL_COST_MAP=true` so importing its
+backend uses bundled provider metadata without a pricing download. An explicit
+environment value takes precedence; the local embedding model is unchanged.
+
 ## Prepare an offline bundle while online
 
 First complete the online sync above for the exact checkout and target Python.

@@ -10,6 +10,13 @@ reported incomplete setup. It stays outside automatic business skill discovery.
 Later tasks, updates and resumes reuse recorded choices and completed stages.
 Independent local work can continue while answers or authentication are pending.
 
+For enterprise proxy or certificate failures, use the standard-library
+[network deployment entry](../../../docs/enterprise-network.md). Incomplete
+Fork/dependency setup discovers existing routes and reuses system trust once;
+completed setup and ordinary tasks do not probe again. Recover existing trusted
+CA sources before asking for new material. A local CA bundle does not prove that
+Windows gh or a remote container uses that trust store.
+
 Discover the available GitHub identity once:
 
 ```text

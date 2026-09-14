@@ -397,7 +397,7 @@ def test_powershell_no_python_failure_can_be_collected(tmp_path):
     installer = ROOT / ".agents/bootstrap/repo-init/scripts/install-gh-user.ps1"
     root = tmp_path / "diagnostics"
     # A shell-local replacement proves logging without network or installation.
-    command = ("function Invoke-RestMethod { throw 'fixture-no-network' }; "
+    command = ("function Start-Job { throw 'fixture-no-network' }; "
                "try { & '" + str(installer).replace("'", "''") + "' } catch { exit 7 }")
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
                             capture_output=True, text=True,

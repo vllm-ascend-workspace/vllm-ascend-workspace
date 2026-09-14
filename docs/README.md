@@ -24,6 +24,7 @@ command recipe. Superseded designs and duplicate inventories are retained in Git
 
 - [design-principles.md](design-principles.md) — nine governing principles; total Agent task cost takes priority, tools stay bounded, knowledge is advisory, and valid work is reused.
 - [windows-installation.md](windows-installation.md) — PowerShell setup, same-filesystem uv cache and verified offline transfer.
+- [enterprise-network.md](enterprise-network.md) — enterprise proxy and CA discovery, trust recovery, bounded downloads, native checks and setup recovery.
 - [local-tests.md](local-tests.md) — local test progress, subprocess lifetime, retained evidence and validated retries.
 - [runtime-feedback-design.md](runtime-feedback-design.md) — real-machine progress, loaded runtime identity, state projection, compact output and connection diagnostics.
 - [diagnostics-system.md](diagnostics-system.md) — shared severity, phase timing, bounded local evidence, automatic redacted issues and supervised Grok diagnosis.

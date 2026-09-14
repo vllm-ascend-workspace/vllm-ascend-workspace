@@ -30,6 +30,7 @@ class GitHub:
 def setup(tmp_path, monkeypatch):
     import vaws_local_state
     monkeypatch.setattr(vaws_local_state, "shared_workspace_root", lambda root: Path(root))
+    monkeypatch.setattr(onboarding, "prepare_network", lambda root: {"status": "ready", "network_checked": True})
     calls = []
     account = GitHub()
     def runner(command, root, environment):

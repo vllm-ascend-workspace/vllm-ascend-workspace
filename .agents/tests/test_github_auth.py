@@ -16,7 +16,8 @@ import vaws_github as github
 
 
 @pytest.fixture(autouse=True)
-def isolated_credentials(monkeypatch):
+def isolated_credentials(monkeypatch, tmp_path):
+    monkeypatch.setattr(github, "ROOT", tmp_path)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
@@ -210,10 +211,13 @@ def test_token_git_helper_is_scoped_idempotent_and_credential_free(tmp_path, mon
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
-    assert github.configure_token_git(tmp_path) == "configured"
-    assert github.configure_token_git(tmp_path) == "reused"
+    assert github.configure_token_git(tmp_path) == "command_scoped"
+    assert github.configure_token_git(tmp_path) == "command_scoped"
     config = (tmp_path / ".git/config").read_text(encoding="utf-8")
-    assert secret not in config and "vaws_git_credential.py" in config
+    assert secret not in config and "vaws_git_credential.py" not in config
+    github.replace_values(tmp_path, "credential.https://github.com.helper", ["", github._credential_command()])
+    assert github.configure_token_git(tmp_path) == "legacy_override_removed"
+    assert github.config_values(tmp_path, "credential.https://github.com.helper", local=True) == []
     github.replace_values(tmp_path, "credential.https://github.com.helper", ["custom-existing-helper"])
     assert github.configure_token_git(tmp_path) == "existing_helper_preserved"
     assert github.config_values(tmp_path, "credential.https://github.com.helper", local=True) == ["custom-existing-helper"]

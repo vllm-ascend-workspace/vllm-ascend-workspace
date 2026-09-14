@@ -19,6 +19,24 @@ deps = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deps)
 
 
+def test_local_knowledge_defaults_to_bundled_model_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(knowledge, "shared_workspace_root", lambda root: root)
+    monkeypatch.setattr(knowledge, "knowledge_identity", lambda root: {"origin_repo": "example/repo"})
+    monkeypatch.delenv("LITELLM_LOCAL_MODEL_COST_MAP", raising=False)
+    assert knowledge.knowledge_server_env(tmp_path)["LITELLM_LOCAL_MODEL_COST_MAP"] == "true"
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "false")
+    assert knowledge.knowledge_server_env(tmp_path)["LITELLM_LOCAL_MODEL_COST_MAP"] == "false"
+
+
+def test_origin_probe_does_not_inherit_mcp_stdin_and_is_bounded(tmp_path, monkeypatch):
+    def timeout(command, **kwargs):
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 5
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+    monkeypatch.setattr(knowledge.subprocess, "run", timeout)
+    assert knowledge.origin_repo_from_git(tmp_path) == "local/unpublished"
+
+
 def test_mounted_workspace_reserves_windows_owner_before_it_is_installed(monkeypatch):
     monkeypatch.setattr(owner, "os", SimpleNamespace(name="posix", environ={"WSL_DISTRO_NAME": "test"}))
     root = PurePosixPath("/mnt/d/work")
@@ -107,6 +125,17 @@ def test_invalid_prepare_reply_is_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge, "knowledge_owner_env", lambda root: {})
     monkeypatch.setattr(knowledge.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "not JSON"))
     assert knowledge.prepare_knowledge(tmp_path)["status"] == "pending"
+
+
+def test_native_crash_retains_status_and_runtime_remedy(tmp_path, monkeypatch):
+    monkeypatch.setattr(knowledge, "knowledge_owner_python", lambda root, **kw: sys.executable)
+    monkeypatch.setattr(knowledge, "knowledge_owner_env", lambda root: {})
+    monkeypatch.setattr(knowledge.subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, -1073741819, ""))
+    code, result = knowledge.run_knowledge_cli(tmp_path, ["status"])
+    assert code == -1073741819 and result["ready"] is False
+    assert "0xC0000005" in result["reason"]
+    assert "Visual C++ runtime" in result["reason"]
 
 
 @pytest.mark.parametrize("options", [[], ["--locked"], ["--locked", "--group", "dev"], ["--group", "dev", "--locked"]])

@@ -36,11 +36,14 @@ def git(root: Path, *args: str, data: bytes | None = None, env=None, timeout: in
     action = args[0] if args else "unknown"
     measured = action in {"fetch", "clone", "checkout", "reset", "push", "ls-remote"}
     with phase("source.git", action=action, level="INFO" if measured else "DEBUG"):
-        result = subprocess.run(
-            ["git", *(["-c", "core.longpaths=true"] if os.name == "nt" else []),
-             "--no-optional-locks", "-C", str(root), *args], input=data, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, env=environment, timeout=timeout, check=False,
-        )
+        command = ["git", *(["-c", "core.longpaths=true"] if os.name == "nt" else []),
+                   "--no-optional-locks", "-C", str(root), *args]
+        from vaws_process_wait import run_captured
+        if action in {"fetch", "clone", "push", "ls-remote"}:
+            from vaws_network import environment_for
+            environment = environment_for(root, environment)
+        result = run_captured(command, stage="source_" + action, timeout=timeout,
+                              env=environment, encoding=None, limit=None, input_data=data)
         if result.returncode:
             raise WorkspaceCopyError(result.stderr.decode("utf-8", "replace").strip())
     return result.stdout

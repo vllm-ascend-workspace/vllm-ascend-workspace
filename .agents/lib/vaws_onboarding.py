@@ -15,6 +15,7 @@ import time
 
 from vaws_community import POLICY_URL, community_environment, read_choice, write_choice, policy_path, disable_knowledge
 from vaws_github import atomic_json, load_github_identity
+from vaws_network import prepare as prepare_network
 
 SCHEMA = "vaws.onboarding.v1"
 REFERENCE = ".agents/bootstrap/repo-init/SKILL.md"
@@ -312,6 +313,12 @@ def initialize(root: Path, *, github_user: str | None = None, fork: bool | None 
             return {"state": "configured", "fork": "declined", "github_user": login}
 
         try:
+            # Only incomplete setup enters discovery; a ready workspace's early
+            # return above remains entirely local and does not add a new gate.
+            if any(steps.get(name, {}).get("state") != "ready" for name in ("fork", "dependencies")):
+                step("network", lambda: prepare_network(root))
+            environment = {**community_environment(root), "PYTHONUTF8": "1",
+                           "GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1"}
             step("fork", lambda: setup(root, choices["github_user"], apply=True, roles=["workspace"], client=github)
                  if choices["fork"] else identity_only())
             dependency = step("dependencies", lambda: runner(

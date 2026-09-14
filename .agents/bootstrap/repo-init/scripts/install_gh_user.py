@@ -4,7 +4,7 @@
 Supported platforms:
   - macOS
   - Linux
-Use the companion PowerShell script on Windows.
+  - Windows with an existing Python; the PowerShell fallback needs no Python.
 """
 
 from __future__ import annotations
@@ -25,6 +25,9 @@ import json
 import os
 import pathlib
 import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / ".agents/lib"))
 
 import platform
 import re
@@ -63,17 +66,15 @@ def detect_target() -> tuple[str, str, str]:
         return "macOS", arch, "zip"
     if system == "Linux":
         return "linux", arch, "tar.gz"
+    if system == "Windows":
+        return "windows", arch, "zip"
 
     fail("this fallback installer supports only macOS and Linux")
 
 
 def latest_release() -> dict:
-    req = urllib.request.Request(
-        API_URL,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "repo-init-fallback"},
-    )
-    with urllib.request.urlopen(req) as resp:
-        return json.load(resp)
+    from vaws_network import fetch_bytes
+    return json.loads(fetch_bytes(API_URL, deadline=30))
 
 
 def select_asset(release: dict, os_token: str, arch: str, ext: str) -> dict:
@@ -91,7 +92,7 @@ def ensure_dir(path: pathlib.Path) -> None:
 
 def install_zip(archive_path: pathlib.Path, target_bin: pathlib.Path) -> None:
     with zipfile.ZipFile(archive_path) as zf:
-        members = [name for name in zf.namelist() if name.endswith("/bin/gh")]
+        members = [name for name in zf.namelist() if name.endswith(("/bin/gh", "/bin/gh.exe")) or name == "bin/gh.exe"]
         if not members:
             fail("zip archive does not contain bin/gh")
         member = members[0]
@@ -112,30 +113,45 @@ def install_tar(archive_path: pathlib.Path, target_bin: pathlib.Path) -> None:
             shutil.copyfileobj(src, dst)
 
 
-def main() -> None:
+def install() -> None:
     os_token, arch, ext = detect_target()
     release = latest_release()
     asset = select_asset(release, os_token, arch, ext)
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", release["tag_name"]):
+        fail("unexpected release tag")
+    from vaws_network import fetch_bytes, owner
+    from vaws_public_download import download
+    checksum_asset = next((item for item in release["assets"] if item["name"].endswith("_checksums.txt")), None)
+    if not checksum_asset:
+        fail("release has no published checksums")
+    checksums = fetch_bytes(checksum_asset["browser_download_url"], deadline=30).decode("ascii")
+    expected = next((parts[0] for line in checksums.splitlines() if len(parts := line.split()) == 2 and parts[1].lstrip("*") == asset["name"]), None)
+    if not expected or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        fail("release checksum does not cover the selected asset")
 
     home = pathlib.Path.home()
     install_root = home / ".local" / "gh" / release["tag_name"]
     install_bin_dir = install_root / "bin"
     link_bin_dir = home / ".local" / "bin"
+    if os_token == "windows":
+        install_root = pathlib.Path(os.environ["LOCALAPPDATA"]) / "Programs/GitHubCLI" / release["tag_name"]
+        install_bin_dir = install_root / "bin"
+        link_bin_dir = install_root.parent / "current"
     ensure_dir(install_bin_dir)
     ensure_dir(link_bin_dir)
 
-    target_bin = install_bin_dir / "gh"
-    link_bin = link_bin_dir / "gh"
+    binary = "gh.exe" if os_token == "windows" else "gh"
+    target_bin = install_bin_dir / binary
+    link_bin = link_bin_dir / binary
 
-    with tempfile.TemporaryDirectory(prefix="repo-init-gh-") as tmp_dir:
-        archive_path = pathlib.Path(tmp_dir) / asset["name"]
-        print(f"Downloading {asset['name']} ...")
-        urllib.request.urlretrieve(asset["browser_download_url"], archive_path)
+    archive_path = owner(ROOT) / ".vaws-local/downloads" / expected / asset["name"]
+    print(f"Downloading {asset['name']} ...")
+    print(json.dumps(download(asset["browser_download_url"], archive_path, expected)))
 
-        if ext == "zip":
-            install_zip(archive_path, target_bin)
-        else:
-            install_tar(archive_path, target_bin)
+    if ext == "zip":
+        install_zip(archive_path, target_bin)
+    else:
+        install_tar(archive_path, target_bin)
 
     mode = target_bin.stat().st_mode
     target_bin.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -143,7 +159,10 @@ def main() -> None:
     if link_bin.exists() or link_bin.is_symlink():
         link_bin.unlink()
     try:
-        link_bin.symlink_to(target_bin)
+        if os_token == "windows":
+            shutil.copy2(target_bin, link_bin)
+        else:
+            link_bin.symlink_to(target_bin)
     except OSError:
         shutil.copy2(target_bin, link_bin)
 
@@ -154,12 +173,21 @@ def main() -> None:
     if str(link_bin_dir) not in path_entries:
         print("")
         print("Add this directory to PATH if needed:")
-        print(f"  export PATH=\"{link_bin_dir}:$PATH\"")
+        if os_token == "windows":
+            print(f"  Add {link_bin_dir} to your user PATH in Windows settings.")
+        else:
+            print(f"  export PATH=\"{link_bin_dir}:$PATH\"")
 
     print("")
     print("Verify with:")
     print("  gh --version")
     print("  gh auth status --hostname github.com")
+
+
+def main() -> None:
+    from vaws_network import network_scope
+    with network_scope(ROOT):
+        install()
 
 
 if __name__ == "__main__":

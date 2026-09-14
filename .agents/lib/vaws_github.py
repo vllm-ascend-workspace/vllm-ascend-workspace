@@ -91,9 +91,11 @@ class GitHubClient:
         method = method.upper()
         if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             raise GitHubAPIError("Unsupported GitHub API method")
-        if self.provider != "gh":
-            return self._token_api(endpoint, method, fields)
-        return self._gh_api(endpoint, method, fields)
+        from vaws_network import network_scope
+        with network_scope(ROOT):
+            if self.provider != "gh":
+                return self._token_api(endpoint, method, fields)
+            return self._gh_api(endpoint, method, fields)
 
     @staticmethod
     def _decode(body: str, endpoint: str, evidence: dict) -> dict:
@@ -235,17 +237,15 @@ def github_git_environment(environment: dict | None = None) -> dict:
 
 
 def configure_token_git(repo: Path) -> str:
-    """Save only a helper path in this repository; never persist a token."""
-    if GitHubClient().provider == "gh":
-        return "unchanged"
+    """Keep token overrides command-scoped so later keyring auth still works."""
     key, helper = "credential.https://github.com.helper", _credential_command()
     values = config_values(repo, key, local=True)
     if values == ["", helper]:
-        return "reused"
+        replace_values(repo, key, [])
+        return "legacy_override_removed"
     if values:
         return "existing_helper_preserved"
-    replace_values(repo, key, ["", helper])
-    return "configured"
+    return "command_scoped" if GitHubClient().provider != "gh" else "unchanged"
 
 
 def validate_github_user(payload: dict, requested_login: str) -> str:
@@ -314,8 +314,12 @@ def atomic_json(path: Path, payload: dict) -> None:
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    environment = github_git_environment()
+    if args and args[0] in {"fetch", "clone", "push", "ls-remote"}:
+        from vaws_network import environment_for
+        environment = environment_for(ROOT, environment)
     result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
-                            text=True, encoding="utf-8", errors="replace", env=github_git_environment(), timeout=120)
+                            stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", env=environment, timeout=120)
     if check and result.returncode:
         raise ForkPolicyError(_safe_text(result.stderr).strip() or "Git command failed")
     return result

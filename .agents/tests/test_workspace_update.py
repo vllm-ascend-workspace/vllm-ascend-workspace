@@ -20,7 +20,7 @@ REAL_PREPARE = updates.WorkspaceUpdater.prepare
 
 
 def git(root, *args):
-    result = subprocess.run(["git", "-c", "core.longpaths=true", "-C", str(root), *args], capture_output=True, text=True,
+    result = subprocess.run(["git", "-c", "core.longpaths=true", "-C", str(root), *args], stdin=subprocess.DEVNULL, timeout=30, capture_output=True, text=True,
                             encoding="utf-8", env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1"})
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()

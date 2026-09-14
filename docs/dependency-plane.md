@@ -119,6 +119,23 @@ An ordinary core command reads the ready receipt and never installs packages.
 installation fails, the already-ready runtime remains usable; a retry uses the
 same child key and lock. No model or index work is part of package sync.
 
+For a proxy whose CA is installed in the operating system trust store, `sync`
+also forwards `--native-tls` / `--system-certs` and preserves `UV_NATIVE_TLS` /
+`UV_SYSTEM_CERTS` for its uv installer. It also preserves `UV_HTTP_TIMEOUT` and
+`UV_CONCURRENT_DOWNLOADS` to tune slow or connection-limited proxies. These
+transport settings leave the locked selection and cache key unchanged.
+Other `UV_*` overrides remain filtered so they
+cannot redirect the environment or change its dependency selection. See the
+[Windows proxy recipe](windows-installation.md#corporate-proxies-and-system-certificates).
+
+`VAWS_PYPI_MIRROR` optionally selects an HTTPS PyPI mirror with compatible
+`packages/` paths. Cold installs compare small download samples before selecting
+the faster source; warm reuse and offline mode perform no probes. Registry and
+artifact URLs change only in the temporary installation copy, with the original
+versions, hashes and dependency graph retained and `uv sync --locked` enforced.
+Canonical receipt inputs and environment keys do not change. Mirror selection and
+measured rates are recorded in installation timings without credential-bearing URLs.
+
 `sync` installs or reuses packages and reports only their environment receipt.
 It does not import the knowledge service, inspect its readiness, prepare a model
 or index, or start maintenance. Knowledge MCP activates those capabilities on

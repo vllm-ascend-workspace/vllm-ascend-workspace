@@ -39,6 +39,8 @@ def ensure_workspace_interpreter(
     configure_windows_stdio()
     if os.environ.get(SKIP_ENV) == "1":
         return
+    from vaws_windows_runtime import configure_windows_runtime
+    configure_windows_runtime(repo_root)
     try:
         # Native GUI shells need not inherit the hook/MCP process's pin. Their
         # worktree selection remains valid while the Agent edits dependencies.

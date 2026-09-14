@@ -253,11 +253,16 @@ runpy.run_path(sys.argv[0], run_name='__main__')
 
 def test_same_interpreter_needs_no_input_replay_file():
     import vaws_venv as bootstrap
+    from types import SimpleNamespace
 
     receipt = {"python": sys.executable, "root": sys.prefix, "key": "current", "receipt": "current.json"}
+    # Lazy imports still need the real interpreter's other startup flags.
+    flags = SimpleNamespace(**{name: getattr(sys.flags, name)
+                               for name in dir(sys.flags) if not name.startswith("_")})
+    flags.utf8_mode = 1
     with mock.patch.object(bootstrap, "native_ready", return_value=receipt), \
          mock.patch.object(bootstrap, "capability_receipt", return_value=receipt), \
-         mock.patch.object(bootstrap.sys, "flags", type("Flags", (), {"utf8_mode": 1})()), \
+         mock.patch.object(bootstrap.sys, "flags", flags), \
          mock.patch.object(bootstrap.tempfile, "TemporaryFile") as temporary, \
          mock.patch.dict(os.environ):
         os.environ.pop(bootstrap.SKIP_ENV, None)
